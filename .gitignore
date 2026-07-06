@@ -36,6 +36,7 @@ tasks/
 
 memory/*
 !memory/memory_management_sop.md
+!memory/git_connection_cleanup_checkpoint.md
 
 # Allow tracking of specific SOPs
 !memory/web_setup_sop.md
