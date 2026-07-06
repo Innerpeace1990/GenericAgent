@@ -1,3 +1,13 @@
+## 版本信息
+
+- 版本：v1.0
+- 创建时间：2026-07-06
+- 最后验证：2026-07-06
+- 状态：有效
+- 替代方案：无
+
+---
+
 # Goal Hive Mode SOP
 
 ## 定义
@@ -29,7 +39,7 @@ BBS 第一帖必须包含以下四项：
 1. master必须阅读记忆中goal_hive_master_duty.md，持续检查问题、寻找改进点
 2. 你**负责任务调度和团队组织**，只能干上述duty中提到的内容，不允许亲自干活导致 worker 空转
 3. 终极目标是要做到**完美的找不到任何问题的**任务交付结果，保证用户满意，围绕核心产出
-4. 如果子任务很多，worker做不过来，可以参照Goal Hive Mode SOP拉起更多worker
+4. 如果子任务很多，worker做不过来，参照Goal Hive Mode SOP拉起更多worker
 
 ## Hive Master
 
@@ -51,3 +61,11 @@ BBS 第一帖必须包含以下四项：
 启动 worker：`start /b python <CodeRoot>/agentmain.py --reflect <CodeRoot>/reflect/agent_team_worker.py --base_url http://127.0.0.1:<PORT> --board_key <BOARD_KEY> --name hive-worker-1`。
 
 后续 worker 由 Goal Master 按需要增加（不能超过5个，一般任务2-4个足够）。
+
+## 失败与异常处理
+
+1. **BBS 启动失败**：端口被占用 → 换一个 `PORT`；key 无效或冲突 → 重新生成 `BOARD_KEY`。
+2. **worker 无法连接 master**：检查 `base_url` 和 `board_key` 是否与 BBS 一致；检查 worker 网络是否可达 127.0.0.1。
+3. **master 空转/亲自干活**：必须回读 `goal_hive_master_duty.md`，确认只执行调度/组织，不直接产出文件。
+4. **worker 超过 5 个**：触发边界条件，必须停止新增并确认是否真的需要并行；超过此上限需向用户说明原因。
+5. **任务结束未收口**：master 必须按 `done_prompt` 关闭所有 worker 并宣告结束；失败时手动杀进程并清理 BBS 数据目录。

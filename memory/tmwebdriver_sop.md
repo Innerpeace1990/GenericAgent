@@ -1,3 +1,13 @@
+## 版本信息
+
+- 版本：v1.0
+- 创建时间：2026-07-06
+- 最后验证：2026-07-06
+- 状态：有效
+- 替代方案：无
+
+---
+
 # TMWebDriver SOP
 
 - 直接用web_scan/web_execute_js工具。本文件只记录特性和坑。
@@ -9,8 +19,8 @@
 - ✅web_scan自动穿透同源iframe；跨域iframe需CDP或postMessage（见下方章节）
 
 ## 限制(isTrusted)
-- JS事件`isTrusted=false`，敏感操作（如文件上传/部分按钮）可能被拦截；这类场景首选**CDP桥**
-- ⚠JS点击按钮打不开新tab→可能是浏览器弹窗拦截，换CDP点击试试
+- JS事件`isTrusted=false`，敏感操作（如文件上传/部分按钮）会被拦截；这类场景首选**CDP桥**
+- ⚠JS点击按钮打不开新tab→原因是浏览器弹窗拦截，换CDP点击试试
 - Vue3自定义组件(Select/Dropdown)：⭐优先vnode实例调用(无视口限制)→见**vue3_component_sop**；CDP坐标点击仅适合选项少且可见的场景
 - 文件上传：⭐首选**DataTransfer API**（纯JS，无CDP依赖）：`new File([content],name,{type}) → new DataTransfer().items.add(file) → input.files=dt.files → dispatch input+change`；CDP `DOM.setFileInputFiles` 在tmwd桥环境nodeId跨调用失效，不推荐；备选ljqCtrl物理点击
 - 需转物理坐标时：`physX = (screenX + rect中心x) * dpr`，`physY = (screenY + chromeH + rect中心y) * dpr`；其中 `chromeH = outerHeight - innerHeight`
@@ -22,7 +32,7 @@
 - class名混淆禁硬编码，点击结果用 `[role=button]` div
 - web_scan过滤边栏，弹出后用JS：文本`document.body.innerText`，大图遍历img按`naturalWidth`最大取src
 - "访问"链接：遍历a找`textContent.includes('访问')`的href
-- 缩略图：`img[src^="data:image"]`直接提取；大图src可能截断用`return img.src`
+- 缩略图：`img[src^="data:image"]`直接提取；大图src会截断用`return img.src`
 
 ## Chrome下载PDF
 场景：PDF链接在浏览器内预览而非下载
@@ -53,6 +63,8 @@ web_execute_js script='{"cmd": "batch", "commands": [...]}'
 // 返回值直接是JSON结果
 ```
 通信方式：⭐JSON字符串直传(首选) | TID DOM方式(TID元素+MutationObserver，web_scan/execute_js底层依赖)
+- 验证扩展是否就绪：`web_execute_js script='{"cmd": "management", "method": "list"}'` 能返回扩展列表即说明 WS 与 background 通信正常。
+- ⚠️ 不要直接在新标签页打开 `chrome-extension://<ID>/popup.html` 验证 popup，Chrome 会报 `ERR_BLOCKED_BY_CLIENT`；功能验证应通过上述 JSON 命令完成。
 单命令：`{cmd:'tabs'}` | `{cmd:'cookies'}` | `{cmd:'cdp', tabId:N, method:'...', params:{...}}` | `{cmd:'management', method:'list|reload|disable|enable', extId:'...'}`
 - management：list返回所有扩展信息；reload/disable/enable需传extId
 - contentSettings：`{cmd:'contentSettings', type:'automaticDownloads', pattern:'https://*/*', setting:'allow'}`
@@ -67,7 +79,7 @@ web_execute_js script='{"cmd": "batch", "commands": [...]}'
   - 典型文件上传：getDocument(**depth:1**) → querySelector(`input[type=file]`) → setFileInputFiles
   - 思想：
     - 同一链路内保持nodeId来源一致，不混用querySelector路径与performSearch路径
-    - 上传后前端框架可能不感知，必要时JS补发`input`/`change`事件
+    - 上传后前端框架若未感知，必要时JS补发`input`/`change`事件
     - 上传前检查`input.accept`；多input时用accept/父容器语义区分
     - 等待元素优先用`DOM.performSearch('input[type=file]')`做轻量轮询
     - 瞬态input的核心是**缩短发现→setFileInputFiles时间窗**：优先同batch完成；再不行用DOM事件监听；猴子补丁仅作兜底思路
@@ -129,6 +141,8 @@ web_execute_js script='{"cmd": "batch", "commands": [...]}'
 - simphtml：`str(simphtml.optimize_html_for_tokens(html))` — 返回BS4 Tag需str()
 
 ## 连不上排查
+
+> 🔴 **CHECKPOINT**：当 `web_scan`/`web_execute_js` 失败时，必须按以下顺序记录排查结果：失败报错、浏览器进程状态、18766 端口监听状态、扩展安装状态。每步需明确“通过/不通过/跳过”，再决定是否请求用户协助。
 web_scan失败时按序排查（自动检测优先，用户参与放最后）：
 ①浏览器没开？→检查浏览器进程是否在跑(tasklist/ps)，没有则启动并打开正常URL（⚠about:blank等内部页不加载扩展）
 ②WS后台挂了？→本机18766端口没监听即dead→手动**后台持续运行**`from TMWebDriver import TMWebDriver; TMWebDriver()`起master

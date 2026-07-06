@@ -1,3 +1,13 @@
+## 版本信息
+
+- 版本：v1.0
+- 创建时间：2026-07-06
+- 最后验证：2026-07-06
+- 状态：有效
+- 替代方案：无
+
+---
+
 # Checklist SOP
 
 ## Booter（启动者/用户）
@@ -5,14 +15,14 @@
 **Checklist 模式**（单人，master自己执行）：
 ```python
 from checklist_helper import CL
-cl = CL("cl_xxx", goal="<用户要求任务，尽量原样>")
+cl = CL("cl_xxx", goal="<用户要求任务，保持原样>")
 cl.start_master()   # Only for Booter，Master严禁调用
 ```
 
 **MapReduce 模式**（多人，master派发+worker执行）：
 ```python
 from checklist_helper import CL
-cl = CL("cl_xxx", goal="<用户要求任务，尽量原样>", workers=2)
+cl = CL("cl_xxx", goal="<用户要求任务，保持原样>", workers=2)
 cl.start_master()   # Only for Booter，Master严禁调用
 ```
 

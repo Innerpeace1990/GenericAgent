@@ -1,6 +1,18 @@
+## 版本信息
+
+- 版本：v1.0
+- 创建时间：2026-07-06
+- 最后验证：2026-07-06
+- 状态：有效
+- 替代方案：无
+
+---
+
 # ljqCtrl 使用与坐标转换 SOP
 
 > **must call update working ckp**：`一律使用物理坐标｜禁pyautogui｜操作前先激活窗口`
+>
+> **适用环境**：Windows 10/11；macOS 内容描述 Windows 的替代实现（`macljqCtrl`），其他平台需替换为对应窗口/键鼠 API。
 
 ## 0. API 快速参考 (Signatures)
 - `ljqCtrl.dpi_scale`: float (缩放系数 = 逻辑宽度 / 物理宽度)

@@ -1,3 +1,13 @@
+## 版本信息
+
+- 版本：v1.0
+- 创建时间：2026-07-06
+- 最后验证：2026-07-06
+- 状态：有效
+- 替代方案：无
+
+---
+
 # Goal Mode SOP
 
 ## 何时使用
@@ -48,3 +58,11 @@ set GOAL_STATE=temp/goal_xxx.json && start /b python agentmain.py --reflect refl
 
 - 状态：读 goal_state.json 的 `turns_used` / `status`
 - 详情：看 `temp/model_responses/` 下最近修改的文件尾部
+
+## 失败与异常处理
+
+1. **agentmain 无法后台启动**：检查 `agentmain.py` 路径和 `reflect/goal_mode.py` 是否存在；环境变量 `GOAL_STATE` 是否正确设置。
+2. **预算耗尽但未收口**：`goal_state.json` 中 `status` 仍应为 `"running"` 直到收口完成；若长时间未收口，手动读取 `temp/model_responses/` 最新文件确认是否仍在运行。
+3. **max_turns 超过上限**：达到 `max_turns` 后必须停止并汇报当前状态；如需继续必须经用户同意并调整上限。
+4. **多实例冲突**：多个 `goal_state.json` 实例时，确保每次调用使用正确的 `GOAL_STATE` 环境变量，避免状态互相覆盖。
+5. **手动停止**：用精确 PID 结束进程，禁止无条件杀所有 Python 进程，防止误杀自身。

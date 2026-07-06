@@ -1,3 +1,13 @@
+## 版本信息
+
+- 版本：v1.0
+- 创建时间：2026-07-06
+- 最后验证：2026-07-06
+- 状态：有效
+- 替代方案：无
+
+---
+
 # GA UltraPlan SOP
 ## 1. Protocol: start and continue
 ### What this is
@@ -179,3 +189,11 @@ with phase("Sweep known independent items", "per-item ownership and status"):
         ("Act/verify {previous}", "Use {previous}. Save artifacts under {artifact_dir}; return paths, ID, status, evidence, blocker. Be concise. " + BOUNDARY),
         artifact_dir=ARTIFACT_DIR)
 ```
+
+## 失败与异常处理
+
+1. **plan/import 失败**：只诊断 cwd/path/import/UltraPlan daemon 启动问题，不诊断用户任务本身；确认 `sys.path.append("..")` 和 `assets.ga_ultraplan` 可访问。
+2. **脚本执行无输出/空结果**：检查 `.out.txt` 路径是否存在；子 agent 返回空时必须要求重试或换提示，不能用空结果做后续决策。
+3. **Reducer 无法达成一致**：暴露矛盾、说明覆盖范围、推荐 stop/continue/next archetype；禁止隐藏分歧。
+4. **子任务互相依赖却用了 parallel**：发现后改为 phase/loop 或 mapchain；避免依赖倒置导致结果不可用。
+5. **边界条件**：单个任务过大或子 agent 上下文溢出时，拆分为更细阶段；每个 worker 返回必须包含 stable ID、证据路径、verdict、risk、next action。

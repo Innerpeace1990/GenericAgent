@@ -1,3 +1,13 @@
+## 版本信息
+
+- 版本：v1.0
+- 创建时间：2026-07-06
+- 最后验证：2026-07-06
+- 状态：有效
+- 替代方案：无
+
+---
+
 # 自主行动 SOP
 
 ⚠️ **路径警告**：autonomous_reports 在 temp/ 下，用`./autonomous_reports/`访问，**不是**`../memory/autonomous_reports/`或`../autonomous_reports/`！TODO在cwd下。
@@ -31,7 +41,7 @@ print(get_todo())       # 查看待办
 
 **收尾（4件事缺一不可）**：
 0. 重读本sop
-1. 在cwd写报告（文件名任意），若有记忆更新建议，附在报告末尾
+1. 在cwd写报告（文件名任意），若有记忆更新需求，附在报告末尾
 2. `from/import helper; complete_task(tasktitle, historyline, report_path)` → 自动编号+移报告到 autonomous_reports/+prepend history（historyline 格式：`类型 | 主题 | 结论`，严格单行）
 3. `set_todo()` 获取TODO路径 → 将已完成条目标记为 `[x]`（注意前缀）
 4. 结束，剩余TODO留到下次再做

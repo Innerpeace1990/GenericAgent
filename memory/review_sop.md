@@ -1,3 +1,13 @@
+## 版本信息
+
+- 版本：v1.0
+- 创建时间：2026-07-06
+- 最后验证：2026-07-06
+- 状态：有效
+- 替代方案：无
+
+---
+
 # Review Mode SOP
 
 > In-session adversarial code reviewer。用 `/review` 触发,主 agent 在当前对话内
@@ -167,3 +177,11 @@ PASS / CONDITIONAL / FAIL
 
 - **自定义评审条目**:编辑 `memory/code_review_principles.md`,reviewer 启动时整段注入
 - **触发更换**:要把 `/review` 改成别的命令,只动 `frontends/review_cmd.py` 的 `install()` 一处
+
+## 失败与异常处理
+
+1. **非 git 仓库/未指定范围**：直接提示用户补充文件路径或确认范围，本轮结束；禁止在范围不明时进行评审。
+2. **未读取 code_review_principles.md**：每条 finding 必须能映射到一条原则；若无法映射，则该 finding 不成立。
+3. **用户未确认范围**：必须先列出范围并等待用户确认，再开始 file_read；禁止先读后确认。
+4. **发现未触发 sentinel 或落盘**：若 review 结果未按 SOP 直接 echo 到对话，则本次评审无效。
+5. **边界条件**：改动过大时，按模块分批评审；单次评审文件数不得超过 5 个，避免上下文溢出。

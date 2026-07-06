@@ -1,8 +1,18 @@
+## 版本信息
+
+- 版本：v1.0
+- 创建时间：2026-07-06
+- 最后验证：2026-07-06
+- 状态：有效
+- 替代方案：无
+
+---
+
 # Vue 3 自定义组件 JS 操作 SOP
 
 ## 问题
 Vue 3 自定义组件（如 OxdSelect）通过 `addEventListener` 绑定事件，JS `dispatchEvent` 产生的事件 `isTrusted: false`，组件不响应。
-- `element.click()` 无效（组件可能绑定 mousedown 而非 click）
+- `element.click()` 无效（组件会绑定 mousedown 而非 click）
 - `dispatchEvent(new MouseEvent('mousedown'))` 无效（isTrusted:false）
 - `element.focus()` 不触发 Vue 绑定的 focus handler
 
@@ -70,7 +80,7 @@ ctx.computedOptions; // [{id, label, _selected}, ...]
 - 不需要 CDP 兜底。仅当循环 8 层仍找不到组件时才考虑 CDP 打开+JS 点 option。
 
 ### 循环向上查找模式（推荐）
-单层 `parentElement` 可能不够，用循环更健壮：
+单层 `parentElement` 往往不够，用循环更健壮：
 ```javascript
 function findSelectComp(selectTextEl) {
   for (let el = selectTextEl, up = 0; el && up < 8; el = el.parentElement, up++) {
@@ -143,11 +153,11 @@ fileInput.dispatchEvent(new Event('change', { bubbles: true }));
    - `Object.keys(comp.setupState || {})` → setup 暴露的响应式数据和函数
    - 重点找类似 onSelect/handleSelect/select/setValue 的方法，以及 options/items/computedOptions 之类的选项列表
 5. **试调** — 找到疑似选中方法后，传入选项对象试调，观察 DOM 是否更新
-6. **选项格式** — 不同库的 option 结构不同（可能是 `{id, label}` 也可能是 `{value, text}` 或纯字符串），从选项列表数据中取一个完整对象传入即可
+6. **选项格式** — 不同库的 option 结构不同（为 `{id, label}` 或 `{value, text}` 或纯字符串），从选项列表数据中取一个完整对象传入即可
 
 注意事项：
-- 有些库用 `emits` 而非 methods，选中逻辑可能在父组件而非子组件
-- 有些库 prod build 会 minify 方法名，此时 setupState 里的 key 可能是短名，需结合行为猜测
+- 有些库用 `emits` 而非 methods，选中逻辑在父组件而非子组件
+- 有些库 prod build 会 minify 方法名，此时 setupState 里的 key 会是短名，需结合行为猜测
 - Composition API 组件的逻辑主要在 setupState 而非 $options.methods
 - 如果 proxy 上找不到方法，试试 `comp.exposed`（`<script setup>` 用 defineExpose 暴露的）
 
@@ -181,10 +191,10 @@ fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 
 ### 避坑
 - Element Plus Select 选项被 Teleport 到 body，不在组件 DOM 子树内，要从 `document.querySelectorAll('.el-select-dropdown__item')` 全局找
-- 编辑器可能在 iframe 内（TinyMCE 默认），需 `iframe.contentDocument.body` 操作
-- 提交时数据来源可能不是 Vue state，而是编辑器实例现取 `getHTML()`，所以必须改编辑器 model
+- 编辑器在 iframe 内（TinyMCE 默认），需 `iframe.contentDocument.body` 操作
+- 提交时数据来源不是 Vue state，而是编辑器实例现取 `getHTML()`，所以必须改编辑器 model
 - debounce：有些 wrapper 用 debounce 同步到 v-model，改完后等 300-500ms 再验证
-- Pinia/Vuex：表单数据可能在 store 里而非组件 data，需找到 store 直接赋值
+- Pinia/Vuex：表单数据在 store 里而非组件 data，需找到 store 直接赋值
 
 ## 适用场景
 - Vue 3 自定义 Select/Dropdown/Autocomplete 组件 → vnode 实例方法
@@ -198,3 +208,11 @@ fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 - OrangeHRM (opensource-demo.orangehrmlive.com) Vue 3 + OXD 组件库
 - 本地 Vue3 + Element Plus + 模拟 Quill/Tiptap 富文本靶场 (2026-05-09)
 - 2026-05-08
+
+## 失败与异常处理
+
+1. **找不到组件实例**：循环查找深度超过 8 层仍返回 null → 检查是否从 `targetElement.parentElement` 开始、是否使用了正确的根入口 `document.getElementById('app')._vnode`。
+2. **组件有 proxy 但无 `onSelect` 方法**：说明命中的是展示层而非逻辑层；继续向上查找父组件，直到找到含 `openDropdown`/`onSelect`/`computedOptions` 的实例。
+3. **`isTrusted` 问题仍导致失败**：优先使用 Vue 组件方法；方法不可用或组件非 Vue 3 时，再降级到 CDP 物理打开+点击 option。
+4. **异步选项未加载**：调用 `onSelect` 前确保选项数据已存在；若选项未渲染，先触发打开下拉或等待数据加载。
+5. **边界条件**：深度限制为 50 层避免递归溢出；DOM 结构变化后需重新获取 `rootVnode` 和 targetElement。

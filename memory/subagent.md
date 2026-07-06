@@ -38,7 +38,7 @@
 **原则**：subagent本身是完整agent，接收多步骤任务时应在内部创建plan管理执行
 **触发条件**:任务包含3个以上子步骤、子步骤之间有依赖关系、需要checkpoint来恢复执行
 **实现方式**：
-1. **主agent创建subagent时**：在input.txt中说明任务包含多个步骤，建议使用plan_mode
+1. **主agent创建subagent时**：在input.txt中说明任务包含多个步骤，使用plan_mode
 2. **subagent内部执行**：检测到多步骤任务后，创建 `./subagent_plan.md` 并使用plan_mode执行
 3. **主agent监控**：只关注最终结果（output*.txt），不需要关心subagent内部如何执行
 4. **文件传递机制**：主agent创建subagent时在task_dir中生成 `context.json`，包含所有文件的**绝对路径**
