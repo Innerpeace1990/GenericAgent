@@ -85,8 +85,14 @@ class GenericAgent:
                     else: llm_sessions[i] = ToolClient(mixin)
                 except Exception as e: print(f'\n\n\n[ERROR] Failed to init MixinSession with cfg {s["mixin_cfg"]}: {e}!!!\n\n')
         self.llmclients = llm_sessions
-        self.llmclient = self.llmclients[self.llm_no%len(self.llmclients)]
-        if oldhistory: self.llmclient.backend.history = oldhistory
+        if isinstance(self.llmclients[self.llm_no % len(self.llmclients)], dict):
+            valid = [j for j in range(len(self.llmclients)) if not isinstance(self.llmclients[j], dict)]
+            if not valid: print('[ERROR] load_llm_sessions: all LLM configs failed to init, check mykey.py'); return
+            self.llm_no = valid[self.llm_no % len(valid)]
+        self.llmclient = self.llmclients[self.llm_no % len(self.llmclients)]
+        if oldhistory:
+            try: self.llmclient.backend.history = oldhistory
+            except Exception: pass
     
     def next_llm(self, n=-1):
         self.load_llm_sessions()
