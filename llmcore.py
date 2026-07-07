@@ -1012,11 +1012,11 @@ class MixinSession:
         if getattr(self, '_quality_cascade', True) and isinstance(return_val, list):
             try:
                 from quality_estimator import estimate_quality
-                full_text = ''.join(b.get('text', '') for b in return_val if isinstance(b, dict) and b.get('type') == 'text')
-                text_blocks = [b for b in return_val if isinstance(b, dict) and b.get('type') == 'text']
+                full_text = ''.join((b.get('text','') if b.get('type')=='text' else b.get('thinking','')) for b in return_val if isinstance(b, dict) and b.get('type') in ('text','thinking'))
+                text_blocks = [b for b in return_val if isinstance(b, dict) and b.get('type') in ('text','thinking')]
                 # 有text block才评估(纯tool_use无text不评估防误判); 空text→empty_garbage触发
                 if text_blocks:
-                    qs = estimate_quality(full_text, level='L1', llm_warn=last_chunk if isinstance(last_chunk, str) else None, escalate_threshold=0.3)
+                    qs = estimate_quality(full_text, level='L1', llm_warn=last_chunk if isinstance(last_chunk, str) else None, escalate_threshold=0.4)
                     if qs.suggest_escalate and qs.signals:
                         return f'cascade[{";".join(qs.signals)},score={qs.score}]'
             except Exception:
@@ -1141,6 +1141,7 @@ def resolve_session(cfg_name):
     if not cfg: raise ValueError(f"Config '{cfg_name}' not in mykey")
     if 'native' in cfg_name: return (NativeClaudeSession if 'claude' in cfg_name else NativeOAISession)(cfg=cfg)
     if 'claude' in cfg_name: return ClaudeSession(cfg=cfg)
+    if 'deepseek' in cfg_name: return NativeOAISession(cfg=cfg)
     return LLMSession(cfg=cfg) if 'oai' in cfg_name else None
 
 def resolve_client(cfg_name):
