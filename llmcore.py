@@ -970,6 +970,7 @@ class MixinSession:
         self._quality_switch = cfg.get('quality_switch', True)   # P0: quality-driven switch (max_tokens / malformed tool args)
         self._quality_cascade = cfg.get('quality_cascade', True)   # P2④: L1 heuristic cascade escalation (refusal/empty/strong-repetition)
         self._quality_events = 0
+        self._checkpoint_switch = cfg.get('checkpoint_switch', False)  # P3⑥: auto-checkpoint on quality events
         self._bandit = None   # P3: UCB1 adaptive routing (opt-in via bandit_switch)
         if cfg.get('bandit_switch', False) and len(self._sessions) > 1:
             try:
@@ -1054,6 +1055,16 @@ class MixinSession:
                         _ft = ''.join(b.get('text', '') for b in return_val if isinstance(b, dict) and b.get('type') == 'text')
                         _qs = _eq(_ft, level='L1', llm_warn=last_chunk if isinstance(last_chunk, str) else None)
                         self._bandit.update(idx, _qs.score)
+                    except Exception: pass
+                # P3⑥: auto checkpoint on quality event (defensive, never fail)
+                if getattr(self, '_checkpoint_switch', False):
+                    try:
+                        from state_checkpoint import save_checkpoint
+                        state = {'cur_idx': self._cur_idx, 'switched_at': self._switched_at,
+                                 'quality_events': self._quality_events}
+                        if getattr(self, '_bandit', None):
+                            state['bandit_stats'] = self._bandit.stats()
+                        save_checkpoint(state, 'mixin_session')
                     except Exception: pass
                 return return_val
             if attempt >= self._retries:
