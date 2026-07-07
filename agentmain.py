@@ -80,6 +80,18 @@ class GenericAgent:
         for i, s in enumerate(llm_sessions):
             if isinstance(s, dict) and 'mixin_cfg' in s:
                 try:
+                    if 'judge_fn' not in s['mixin_cfg']:
+                        _jc = next((c for c in llm_sessions if c is not None and not isinstance(c, dict)), None)
+                        if _jc is not None:
+                            import re as _re
+                            def _cj(resp, _jc=_jc):
+                                try:
+                                    jp = "评估回答质量(连贯/完整/无错误):'%s'\n0.9-1.0优秀/0.4-0.6中等/0.0-0.2差。SCORE X.X:" % str(resp)[:800]
+                                    out = ''.join(ch for ch in _jc.chat(messages=[{'role':'user','content':jp}]) if isinstance(ch,str))
+                                    sc = _re.findall(r'SCORE:?\s*([01](?:\.\d+)?)', out)
+                                    return float(sc[-1]) if sc else 0.5
+                                except: return 0.5
+                            s['mixin_cfg']['judge_fn'] = _cj
                     mixin = MixinSession(llm_sessions, s['mixin_cfg'])
                     if isinstance(mixin._sessions[0], (NativeClaudeSession, NativeOAISession)): llm_sessions[i] = NativeToolClient(mixin)
                     else: llm_sessions[i] = ToolClient(mixin)
