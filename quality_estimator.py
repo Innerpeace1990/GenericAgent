@@ -144,7 +144,7 @@ def estimate_quality(
         score = max(0.0, score)
 
     # ── L2 LLM-Judge 层（cost-aware: 仅 mid-range 触发，省 API）──
-    if level == 'L2' and judge_fn is not None and 0.3 <= score <= 0.8:
+    if level == 'L2' and judge_fn is not None and 0.2 <= score <= 0.8:  # 下边界0.2容错(0.30浮点边界也触发)
         try:
             j = float(judge_fn(response_text))
             if 0.0 <= j <= 1.0:
