@@ -143,8 +143,8 @@ def estimate_quality(
                 signals.append('language_mismatch'); score -= 0.4
         score = max(0.0, score)
 
-    # ── L2 LLM-Judge 层（可选）──
-    if level == 'L2' and judge_fn is not None:
+    # ── L2 LLM-Judge 层（cost-aware: 仅 mid-range 触发，省 API）──
+    if level == 'L2' and judge_fn is not None and 0.3 <= score <= 0.7:
         try:
             j = float(judge_fn(response_text))
             if 0.0 <= j <= 1.0:
