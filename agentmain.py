@@ -88,7 +88,7 @@ class GenericAgent:
                                 _orig_temp = getattr(_jc.backend, 'temperature', 1)
                                 try:
                                     _jc.backend.temperature = 0  # judge确定性,消除L2 judge噪声(temperature=1导致0.20/0.50波动)
-                                    jp = "评估回答质量(连贯/完整/无错误):'%s'\n0.9-1.0优秀/0.4-0.6中等/0.0-0.2差。先推理再单独一行 SCORE X.X:" % str(resp)[:500]
+                                    jp = "评估回答是否正确解决了用户任务。评分标准:正确完整解决任务(如正确代码/准确答案)→0.8-1.0;部分正确→0.4-0.7;完全错误或无关→0.0-0.3。任务相关的回答即使有瑕疵也至少0.5。回答内容:'%s' 先一句判断是否正确解决任务,再单独一行 SCORE X.X:" % str(resp)[:500]
                                     out = ''.join(ch for ch in _jc.chat(messages=[{'role':'user','content':jp}]) if isinstance(ch,str))
                                     sc = _re.findall(r'SCORE:?\s*([01](?:\.\d+)?)', out)
                                     return float(sc[-1]) if sc else 0.5
