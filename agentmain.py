@@ -81,14 +81,14 @@ class GenericAgent:
             if isinstance(s, dict) and 'mixin_cfg' in s:
                 try:
                     if 'judge_fn' not in s['mixin_cfg']:
-                        _jc = next((c for c in llm_sessions if c is not None and not isinstance(c, dict)), None)
+                        _jc = (next((c for c in llm_sessions if c is not None and not isinstance(c, dict) and ('kimi' in str(getattr(getattr(c,'backend',c),'name','')).lower())), None) or next((c for c in llm_sessions if c is not None and not isinstance(c, dict)), None))  # L2 judge优先kimi(更强模型)
                         if _jc is not None:
                             import re as _re
                             def _cj(resp, _jc=_jc):
                                 _orig_temp = getattr(_jc.backend, 'temperature', 1)
                                 try:
                                     _jc.backend.temperature = 0  # judge确定性,消除L2 judge噪声(temperature=1导致0.20/0.50波动)
-                                    jp = "评估回答是否正确解决了用户任务。评分标准:正确完整解决任务(如正确代码/准确答案)→0.8-1.0;部分正确→0.4-0.7;完全错误或无关→0.0-0.3。任务相关的回答即使有瑕疵也至少0.5。回答内容:'%s' 先一句判断是否正确解决任务,再单独一行 SCORE X.X:" % str(resp)[:500]
+                                    jp = "评估回答是否正确解决了用户任务。评分标准:功能正确的代码或准确完整的答案→0.7-1.0(正确就该高分,不必苛求完美);部分正确→0.4-0.6;完全错误或无关→0.0-0.3。任务相关且基本正确的回答至少0.7。回答内容:'%s' 先判断是否正确解决,再单独一行 SCORE X.X:" % str(resp)[:500]
                                     out = ''.join(ch for ch in _jc.chat(messages=[{'role':'user','content':jp}]) if isinstance(ch,str))
                                     sc = _re.findall(r'SCORE:?\s*([01](?:\.\d+)?)', out)
                                     return float(sc[-1]) if sc else 0.5
