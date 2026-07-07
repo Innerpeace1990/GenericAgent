@@ -527,7 +527,15 @@ class GenericAgentHandler(BaseHandler):
             from moa import MixtureOfAgents
             use_agg = args.get('use_aggregator', True)
             agg_c = valid[0] if use_agg and len(valid) >= 2 else None
-            moa_inst = MixtureOfAgents(valid, aggregator_client=agg_c, max_proposers=min(3, len(valid)))
+            orm_inst = getattr(self.parent, 'orm', None)
+            if orm_inst is None:
+                try:
+                    from orchestrator_rm import OrchestratorRM
+                    orm_inst = OrchestratorRM()   # 惰性默认单例
+                except Exception:
+                    orm_inst = None
+            cp = lambda: [c for c in getattr(self.parent, 'llmclients', []) if c is not None and not isinstance(c, dict)]
+            moa_inst = MixtureOfAgents(valid, aggregator_client=agg_c, max_proposers=min(3, len(valid)), orm=orm_inst, clients_provider=cp)
             final, scored, meta = moa_inst.ask([{"role": "user", "content": query}])
             if final is None:
                 yield "\u26a0\ufe0f MoA: 所有 proposer 失败\n"

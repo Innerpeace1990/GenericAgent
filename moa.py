@@ -21,11 +21,24 @@ from quality_estimator import estimate_quality
 class MixtureOfAgents:
     """多智能体聚合：多 proposer 并行 + 质量评分 + 聚合。"""
 
-    def __init__(self, clients, aggregator_client=None, max_proposers=3, judge_level='L1'):
+    def __init__(self, clients, aggregator_client=None, max_proposers=3, judge_level='L1', orm=None, clients_provider=None):
         self.proposers = [c for c in clients[:max_proposers] if c is not None and not isinstance(c, dict)]
         self.aggregator = aggregator_client
         self.judge_level = judge_level
+        self.orm = orm                       # P3⑦ 集成: propose 后自动 record 消耗
+        self.clients_provider = clients_provider  # 动态获取当前 clients(感知 handoff/切换)
+        self._max_proposers = max_proposers
         self._lock = threading.Lock()
+
+    def _get_proposers(self):
+        """动态获取 proposers: 有 provider 则每次 ask 时重新解析(感知 handoff 后 llmclients 变化)。"""
+        if self.clients_provider:
+            try:
+                cs = self.clients_provider()
+                return [c for c in cs[:self._max_proposers] if c is not None and not isinstance(c, dict)]
+            except Exception:
+                pass
+        return self.proposers
 
     def _propose_one(self, client, messages, out, idx):
         try:
@@ -37,6 +50,15 @@ class MixtureOfAgents:
                     resp += ch
             with self._lock:
                 out[idx] = resp if resp.strip() else None
+            # P3⑦ 集成: 自动记录 token 消耗到 ORM (用 client.model 作 key; token 粗估)
+            if self.orm is not None:
+                try:
+                    be = getattr(client, 'backend', client)
+                    model = getattr(be, 'model', getattr(client, 'name', 'unknown'))
+                    in_t = sum(len(str(m.get('content', ''))) // 4 for m in messages)
+                    self.orm.record(model, in_t, max(1, len(resp) // 4), 0.0)
+                except Exception:
+                    pass
         except Exception:
             with self._lock:
                 out[idx] = None
@@ -54,10 +76,11 @@ class MixtureOfAgents:
 
     def ask(self, messages):
         """执行 MoA 三阶段。messages: [{"role":"user","content":...}]。返回 (final_text, scored, meta)。"""
-        # Phase 1: 并行 propose
-        out = [None] * len(self.proposers)
+        # Phase 1: 并行 propose (动态获取 proposers, 感知 handoff/切换后 llmclients 变化)
+        proposers = self._get_proposers()
+        out = [None] * len(proposers)
         threads = []
-        for i, c in enumerate(self.proposers):
+        for i, c in enumerate(proposers):
             t = threading.Thread(target=self._propose_one, args=(c, messages, out, i))
             threads.append(t)
             t.start()
