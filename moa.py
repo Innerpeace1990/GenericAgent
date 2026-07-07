@@ -66,12 +66,16 @@ class MixtureOfAgents:
     @staticmethod
     def _build_agg_prompt(user_msg, proposals):
         """构建 aggregator 综合提示：原文 + 各候选 + 综合指令。"""
+        # 过滤极低分 proposal（防御污染 aggregator）
+        good = [(ridx, txt, qs) for ridx, txt, qs in proposals if qs.score >= 0.3]
+        if len(good) < 2:
+            good = proposals[:2]  # 不够时回退取前2
         parts = [f"[用户原始请求]\n{user_msg}\n\n[多个模型的候选响应]"]
-        for i, (ridx, txt, qs) in enumerate(proposals):
+        for i, (ridx, txt, qs) in enumerate(good):
             parts.append(f"\n--- 候选 {i + 1}（模型{ridx}，质量分 {qs.score:.2f}）---\n{txt}")
         parts.append(
-            "\n\n[综合指令] 以上是多个模型对同一请求的候选响应。请综合它们的优点、修正不足，"
-            "输出一个高质量最终响应。保留正确信息，去除冗余/错误，结构清晰。直接输出最终答案。")
+            "\n\n[综合指令] 综合以上候选，给出一个更准确的最终答案。"
+            "只输出答案本身，不加前缀/解释/元评论，不得拒绝回答。直接输出。")
         return [{"role": "user", "content": "\n".join(parts)}]
 
     def ask(self, messages):
