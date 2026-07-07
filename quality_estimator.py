@@ -148,7 +148,10 @@ def estimate_quality(
         try:
             j = float(judge_fn(response_text))
             if 0.0 <= j <= 1.0:
-                score = (score + j) / 2.0          # 规则分与裁判分融合
+                if j < 0.3:
+                    score = j  # judge明确低分→以judge为主,避免L1虚高稀释
+                else:
+                    score = (score + j) / 2.0          # 规则分与裁判分融合
                 signals.append(f'llm_judge={j:.2f}')
         except Exception:
             pass    # judge 失败不影响主评估
