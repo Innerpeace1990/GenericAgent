@@ -1055,7 +1055,14 @@ class MixinSession:
                         from quality_estimator import estimate_quality as _eq
                         _ft = ''.join(b.get('text', '') for b in return_val if isinstance(b, dict) and b.get('type') == 'text')
                         _qs = _eq(_ft, level='L1', llm_warn=last_chunk if isinstance(last_chunk, str) else None)
-                        self._bandit.update(idx, _qs.score, cost=min(1.0, len(_ft)/2000))
+                        _reward = _qs.score
+                        _jf = getattr(self, '_judge_fn', None)
+                        if _jf is not None and 0.3 <= _qs.score <= 0.5:  # Bandit reward条件L2校准: L1边界(0.3-0.5可能误判区)用L2
+                            try:
+                                _qs2 = _eq(_ft, level='L2', judge_fn=_jf)
+                                _reward = _qs2.score
+                            except Exception: pass
+                        self._bandit.update(idx, _reward, cost=min(1.0, len(_ft)/2000))
                     except Exception: pass
                 # P3⑥: auto checkpoint on quality event (defensive, never fail)
                 if getattr(self, '_checkpoint_switch', False):
