@@ -62,6 +62,27 @@ def _sig_repetition(text: str, dup_ratio: float = 0.6) -> bool:
     return (1 - unique_ratio) > dup_ratio   # 重复 trigram 占比 > 阈值
 
 
+def _sig_verbosity(text: str, target_len: int = 20, ratio: float = 2.0) -> bool:
+    """P2修复: 检测输出远超要求字数（原L1盲区：未遵循指令）。"""
+    ct = len(text.replace(' ', '').replace('\n', ''))
+    return ct > max(30, int(target_len * ratio))
+
+def _sig_meta_commentary(text: str) -> bool:
+    """P2修复: 检测思考泄漏/prompt反射（如'User wants'/'我们要求'/英文思考过程）。"""
+    patterns = ['User wants', 'I need to', '我们要求', '用户要求', 'let me', 'I should',
+                'The user is asking', 'One-sentence answer', '直接回答', '不要前缀']
+    matches = sum(1 for p in patterns if p.lower() in text.lower())
+    return matches >= 2
+
+def _sig_language_mismatch(text: str, expected_lang: str = 'zh') -> bool:
+    """P2修复: 检测输出语言与预期不匹配（如要求中文但输出英文）。"""
+    if expected_lang == 'zh':
+        cn = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+        en = sum(1 for c in text if c.isascii() and c.isalpha())
+        return en > max(30, cn * 3) and cn < 10
+    return False
+
+
 # ── L0 硬信号（复用 P0 / llmcore 已有检测，零成本）──
 def _detect_hard_signals(text: str, llm_warn: Optional[str] = None) -> list:
     """从响应文本/warn 字符串检测硬质量信号"""
@@ -114,6 +135,12 @@ def estimate_quality(
                 signals.append('repetition'); score -= 0.4
             if _sig_refusal(response_text):
                 signals.append('refusal'); score -= 0.5
+            if _sig_verbosity(response_text):
+                signals.append('verbosity'); score -= 0.3
+            if _sig_meta_commentary(response_text):
+                signals.append('meta_commentary'); score -= 0.4
+            if _sig_language_mismatch(response_text):
+                signals.append('language_mismatch'); score -= 0.4
         score = max(0.0, score)
 
     # ── L2 LLM-Judge 层（可选）──
