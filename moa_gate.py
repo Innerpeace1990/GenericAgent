@@ -40,7 +40,17 @@ def assess_complexity(query):
     return round(max(0.0, min(1.0, score)), 2), signals
 
 
-def should_use_moa(query, threshold=0.3):
-    """决策门: 复杂度 >= threshold 才启用MoA。返回 (use_bool, complexity, signals)。"""
+# 真实MoA价值场景: 需多视角/创意/对比(多个proposer提供不同角度)
+_MULTI_PERSPECTIVE_KW = ['对比','列出不同','创意','多种方案','优缺点','权衡','多角度','不同观点','备选','多方案']
+
+
+def should_use_moa(query, threshold=0.3, moa_explicit_opt_in=False):
+    """决策门(cost-aware v2): 基于真实发现MoA复杂任务<best_solo且更贵,收紧到多视角场景。
+    放行 = 含多视角关键词 OR 显式opt-in。普通复杂(代码/分析)走单模型更省更好。"""
     complexity, signals = assess_complexity(query)
-    return complexity >= threshold, complexity, signals
+    matched_multi = [k for k in _MULTI_PERSPECTIVE_KW if k in query]
+    use = moa_explicit_opt_in or (len(matched_multi) > 0 and complexity >= threshold)
+    if matched_multi: signals.append('multi_perspective:%s' % ','.join(matched_multi[:2]))
+    if moa_explicit_opt_in: signals.append('explicit_opt_in')
+    return use, complexity, signals
+
