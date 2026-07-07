@@ -85,12 +85,15 @@ class GenericAgent:
                         if _jc is not None:
                             import re as _re
                             def _cj(resp, _jc=_jc):
+                                _orig_temp = getattr(_jc.backend, 'temperature', 1)
                                 try:
-                                    jp = "评估回答质量(连贯/完整/无错误):'%s'\n0.9-1.0优秀/0.4-0.6中等/0.0-0.2差。SCORE X.X:" % str(resp)[:800]
+                                    _jc.backend.temperature = 0  # judge确定性,消除L2 judge噪声(temperature=1导致0.20/0.50波动)
+                                    jp = "评估回答质量(连贯/完整/无错误):'%s'\n0.9-1.0优秀/0.4-0.6中等/0.0-0.2差。先推理再单独一行 SCORE X.X:" % str(resp)[:500]
                                     out = ''.join(ch for ch in _jc.chat(messages=[{'role':'user','content':jp}]) if isinstance(ch,str))
                                     sc = _re.findall(r'SCORE:?\s*([01](?:\.\d+)?)', out)
                                     return float(sc[-1]) if sc else 0.5
                                 except: return 0.5
+                                finally: _jc.backend.temperature = _orig_temp  # 恢复原始温度
                             s['mixin_cfg']['judge_fn'] = _cj
                     mixin = MixinSession(llm_sessions, s['mixin_cfg'])
                     if isinstance(mixin._sessions[0], (NativeClaudeSession, NativeOAISession)): llm_sessions[i] = NativeToolClient(mixin)
