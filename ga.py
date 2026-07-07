@@ -518,6 +518,17 @@ class GenericAgentHandler(BaseHandler):
         if not query:
             yield "\u26a0\ufe0f MoA 需要 query 参数\n"
             return StepOutcome(None, next_prompt="moa_no_query")
+        # P3 gate: cost-aware MoA (simple task → skip MoA, save 2/3 API cost)
+        try:
+            from moa_gate import should_use_moa
+            use_moa, complexity, gate_sigs = should_use_moa(query)
+            if not use_moa:
+                yield f"\u26a0\ufe0f MoA gate skipped (complexity={complexity:.2f}, {gate_sigs}). Use single model to save cost.\n"
+                yield None
+                return StepOutcome({"gate_skipped": True, "complexity": complexity, "reason": ",".join(gate_sigs[:2])},
+                                   next_prompt="moa_gate_skip_simple_task")
+        except Exception:
+            pass
         clients = getattr(self.parent, 'llmclients', [])
         valid = [c for c in clients if c is not None and not isinstance(c, dict)]
         if not valid:
