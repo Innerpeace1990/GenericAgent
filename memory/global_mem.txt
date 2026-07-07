@@ -1,0 +1,98 @@
+# [Global Memory - L2]
+
+## [User Preferences]
+- 打开网页时必须**新建标签页**，禁止覆盖/替换用户当前已打开的网页。
+- 优先保护用户当前工作区，避免关闭、重载或修改已有页面。
+- Generic Agent 是用户电脑的"手和脚"，需要持续加强能力；遇到任何问题，优先通过官方或权威来源寻求解决方案，并检索 GitHub 仓库的优秀案例或方案。
+- 执行失败或遇到问题时，必须建立防死循环机制：1 次失败读错理解原因；2 次失败探测环境状态；3 次失败换方案或请求用户干预；禁止无新信息的重复操作。
+- 参考顶级 AI 公司、行业研究和最佳实践，持续学习并积极借鉴；对外部方案必须评估安全性、合规性、有效性和可度量性。
+- 提高信息密度：输出简洁、结论前置、结构化表达，避免冗余和重复解释。
+- 所有规则必须定期复盘，做好版本管理，标记失效时间和替代方案；对用户指令和引入的资源也要批判性评估，不照单全收。
+- 优先借鉴顶级咨询公司、世界500强、国际标准化委员会（ISO/IEC/ITU）及 PMI、PRINCE2、DevOps、安全、合规、需求管理等全球前沿行业知识体系，并思考实践。
+- 已学习并评估的外部资源：
+  - Stanford OVAL STORM：LLM 驱动的研究写作流水线，可借鉴其模块化 LLM 流程和检索增强思想；对本地 OS 操作型 Agent 不直接适用，但可用于复杂研究型任务。
+  - Andrej Karpathy LLM Wiki：三层知识库（Raw sources/Wiki/Schema）与 Ingest/Query/Lint 工作流，高度契合 Generic Agent 的记忆系统；已引入"Schema 层"和"记忆 Lint"机制。
+  - alchaincyf/darwin-skill：受 Karpathy autoresearch 启发的 Skill 自主优化系统，含 9 维 rubric、独立 judge agent、git ratchet、测试提示词与人在回路；对其 Skill 生态直接适用，对 Generic Agent 的 SOP 评估可借鉴其独立评分与反例黑名单思想。
+- 记忆系统 Lint 机制：
+  - 工具路径：`../memory/memory_lint.py`
+  - 执行周期：每 2 周执行一次（前期小步快跑），执行前需询问用户确认。
+  - 检查项：L1 行数 ≤30 行、L1 索引与 L3 文件一致性、L2 `## [SECTION]` 格式、L3 SOP 版本头完整性。
+
+## [Network / Proxy]
+- 当前 Windows 环境启用了系统代理；pip 安装时必须显式绕过代理，否则会出现 `ProxyError` / `SSLEOFError`。
+- 经验证可用的命令模板：`pip install --proxy= -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn <package>`。
+- 用 Python `requests` 访问 GitHub API/raw 时也会因系统代理触发 `SSLEOFError`；已验证方案：设置 `os.environ['HTTPS_PROXY']=''` 并在 `requests.get(..., proxies={'http': None, 'https': None})` 中显式禁用。
+
+## [Browser / Chrome Environment]
+- 存在本地 WebDriver/自动化桥接服务：HTTP `127.0.0.1:18766`，WebSocket `127.0.0.1:18765`。
+- Chrome 扩展 `tmwd_cdp_bridge` 位于 `../assets/tmwd_cdp_bridge/`（MV3），通过 WebSocket 向 18765 注册并接收 `executeScript` / `tabs` / `cookies` / `cdp` 等指令。
+- 该扩展可通过两种方式加载：
+  - Chrome 启动参数 `--load-extension=...`（持久化，推荐）
+  - chrome://extensions 开发者模式 → "加载已解压的扩展程序"（当前会话已验证，截至 2026-07-06 已加载）
+- 若扩展未加载，则 `web_scan`/`web_execute_js` 等工具无法枚举/操作标签页。
+
+## [Git / GitHub]
+- 本地主仓库根目录：`D:\generic-agent`
+- GitHub fork 地址：`https://github.com/Innerpeace1990/GenericAgent`
+- 本地仓库 remote origin：`git@github.com:Innerpeace1990/GenericAgent.git`（SSH）
+- 专用 SSH 密钥：`C:\Users\wangx\.ssh\id_github_genericagent`
+- 因 Windows 默认使用系统 OpenSSH，Git 已配置 `core.sshCommand` 指向 Git for Windows 自带的 `ssh.exe`，否则新密钥的权限修复不生效。
+- 当前分支：`main`，已与 fork 的 `main` 同步。
+
+## [LLM Orchestration]
+- 当前后端：主模型 `zhipu-glm`（国内 Coding Plan，Anthropic 协议）+ 备用模型 `kimi`（端点 `https://api.kimi.com/coding/v1`），固定顺序故障转移。
+- 模型选择逻辑：先尝试 GLM 主模型，失败/超时后切 Kimi；新增模型不会自动接入，必须手动修改 `llm_nos` 并验证。
+- GLM Coding 最佳实践（来源：docs.bigmodel.cn）：
+  - 任务拆分：先完成小任务，再逐步扩展；复杂任务先进入 Plan Mode 规划。
+  - 上下文管理：通过 `project.md` / `CLAUDE.md` 沉淀项目架构、目录约定、构建测试命令、命名规范；规则要具体、可执行。
+  - 记忆分层：组织级 `system.md`（最高优先级）、项目级 `project.md`、个人级 `user.md`；`CLAUDE.md` 采用叠加模式，`.claude/settings.json` 采用覆盖模式。
+  - 子代理与技能：跨模块/跨领域任务拆分子代理；将可复用流程封装为 Skill（如代码审查、文档生成）。
+  - 外部扩展：通过 MCP 连接外部工具/数据，通过 Skill 定义使用方式与业务逻辑。
+  - 自动化：对重复流程（如 PR 生成、文档同步、测试补充）建立自动化脚本或工作流。
+  - Prompt 工程：明确角色、目标、输入/输出格式、边界条件；对复杂提示做迭代优化。
+  - 权限与验证：敏感操作前确认权限；安装/修改 LLM 配置后做端到端调用验证。
+- 主模型协议/端点：智谱国内 Coding Plan 使用 `https://open.bigmodel.cn/api/anthropic`，对应 `native_claude_config_N`（`NativeClaudeSession`），不是 `native_oai_config_N`。此前因 configure.py 未继承 provider 的 `type`，导致生成错误的 `native_oai_config_0`，GLM 请求失败并静默 fallback 到 Kimi。
+- 配置验证要求：每次安装或修改 `mykey.py` 后，必须执行端到端主模型调用（`NativeClaudeSession(cfg).ask(...)` 或 `MixinSession`），确认返回 `stop_reason=end_turn`/`tool_use`，且厂商控制台有 token 消耗；不能仅依赖“配置成功”日志。
+- 高级路由参考：OpenRouter Pareto Router（偏好学习）、LiteLLM Adaptive Router（延迟/TTFT/成本/吞吐量）、Portkey Conditional Routing + Load Balancing + Fallbacks。
+- 专项定位：
+  - 智谱 GLM：通用综合能力主模型；旗舰 GLM-5.2（1M ctx / 128K out）处理复杂 Coding/长程任务；GLM-5.1/5（200K/128K）用于推理与 Agent 规划；轻量任务用 Flash/Air。
+  - Kimi：长上下文与代码备用；kimi-k2.7-code（256K）用于代码任务，kimi-k2.7-code-highspeed 用于高速代码场景；kimi-k2.6 用于多模态。
+  - DeepSeek API（拟新增）：https://api.deepseek.com，兼容 OpenAI / Anthropic。deepseek-v4-pro（1M ctx / 384K out，并发 500）为推理密集型任务首选；deepseek-v4-flash（1M ctx / 384K out，并发 2500）轻量低延迟。定价（2026-07-07 官方）：V4-Pro 折扣后输入 $0.435 / 输出 $0.87 per 1M；V4-Flash 输入 $0.14 / 输出 $0.28 per 1M；缓存命中价极低（$0.0028–$0.003625/M）。默认开启 thinking，输出较长，适合非实时高质量推理。
+  - 阿里云百炼 Coding Plan（拟新增）：https://coding.dashscope.aliyuncs.com/v1，编程工具专用订阅套餐。Pro 套餐固定月费，支持 qwen3.7-plus / qwen3.6-plus / kimi-k2.5 / glm-5 / MiniMax-M2.5 等；Lite 套餐已于 2026-04-13 停止续费/升级。需使用专属 key（sk-sp-）与 Base URL，禁止用于自动化脚本/后端批量调用，误用通用 key 会按量扣费。
+- 模型经验教训管理：
+  - 不同模型/厂商的 API 协议、套餐、计费、上下文长度、并发限制不同，经验教训禁止做成万能模板。
+  - 每条经验必须标注适用环境、不适用环境、裁剪指引和审计周期；详细记录见 `model_lessons_learned.md`。
+  - 审计周期：每 2 周运行一次 `memory_lint.py` 并复核 `model_lessons_learned.md`；接入新模型、切换套餐或厂商更新后必须立即审计。
+  - 当前已记录：GLM 国内 Coding Plan（Anthropic 协议、native_claude_config 错配导致静默 fallback）、Kimi 备用模型基本使用方式。
+- 决策 SOP：`../memory/llm_orchestration_sop.md` v1.3，含路由策略、论文要点、第三方路由平台、厂商模型矩阵、故障转移、新模型接入流程、安装与配置验证检查点、监控指标。
+- 注意：修改 LLM 配置前确认 TUI 工作线程（如 PID 16188）不受影响。
+
+## [GA Frontends / GA浏览器版]
+- "GA浏览器版"入口：桌面快捷方式 `启动GA浏览器版.lnk` → `launch.pyw` → 启动 `streamlit run frontends/stapp.py --server.port {18501-18599} --server.address localhost --server.headless true --client.toolbarType viewer` → pywebview 打开 `http://localhost:{port}`（窗口约1200×900、右贴边）。端口在 18501-18599 内随机取空闲值。
+- 前端代码（`frontends/`）：`stapp.py`(浏览器版主程序, Streamlit 1.44) / `stapp2.py`(精修版) / `tuiapp_v2.py`(终端版, 启动GA终端版)。
+- `launch.pyw` 每 60s 注入剪贴板粘贴钩子（剪贴板是图片/文件时阻止默认粘贴，转发到聊天输入框 `textarea[data-testid="stChatInputTextArea"]`）。
+- ⚠️ `stapp.py` 内部会实例化 agent 并在自身线程运行 → 该 streamlit 实例就是 agent 的宿主进程，**绝不能杀它**（会杀掉 agent）。编辑 stapp.py 若 runOnSave=false（launch.pyw 未传该参数）则不会自动 rerun，安全；测试新代码应另起新端口实例。
+- Streamlit"3点菜单→Settings→Appearance→Wide mode"勾选会让内容铺满全宽（用户口语称"wild mode"）。
+
+## [Feishu Bot]
+- 应用 ID：`cli_aaa40214f638dbd8`
+- 项目路径：`D:\generic-agent\temp\feishu-bot`
+- LLM 后端：Kimi API，兼容端点 `https://api.kimi.com/coding/v1`
+- 公网隧道：ngrok 二进制路径 `C:\Users\wangx\AppData\Local\ngrok\ngrok.exe`（通过 `start_webhook_ngrok_real.py` 启动）
+- 注意：ngrok 公网 URL 会随进程重启变化，属于易变状态，不记录具体 URL；每次启动后从 `webhook_ngrok_status.json` 读取。
+
+## [WeCom AiBot / 企业微信智能机器人]
+- 项目路径：`D:\generic-agent\temp\wecom_aibot_bot`
+- 凭证：`.env`（Bot ID/Secret，不内联）
+- Python SDK：`wecom-aibot-python-sdk`（import 名 `aibot`）
+- 状态：已跑通连接认证；回复逻辑为 echo，待接入业务/LLM
+- 技术要点：见 `../memory/wecom_aibot_sop.md`
+- 任务恢复：见 `D:\generic-agent\temp\wecom_aibot_bot\TASK_TODO.md`
+
+## [Cost-aware Routing]
+- moa_gate.py: 复杂度评估(长度+关键词+very_short,阈值0.3) + do_moa前置gate。真实验证:简单任务gate拒绝省100%成本,复杂任务gate放行MoA QE无降质。路由从"无脑MoA"升级"成本感知智能决策"
+
+## [Judge Architecture]
+- 优选kimi作judge(agentmain _cj,commit 43e3dc1), temperature=0确定性输出
+- 双向系统流验证: 好输出0.50不误判 + 坏输出0.20触发cascade
+- 之前deepseek作judge保守(0.1-0.2)因能力局限, prompt调优无效, 换更强judge模型解决
