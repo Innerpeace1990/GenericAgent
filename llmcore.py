@@ -971,7 +971,8 @@ class MixinSession:
         self._quality_cascade = cfg.get('quality_cascade', True)   # P2④: L1 heuristic cascade escalation (refusal/empty/strong-repetition)
         self._quality_events = 0
         self._checkpoint_switch = cfg.get('checkpoint_switch', False)  # P3⑥: auto-checkpoint on quality events
-        self._judge_fn = cfg.get('judge_fn')  # L2常态化接入: 可选judge_fn(config驱动,默认None=L1向后兼容)
+        self._judge_fn = cfg.get('judge_fn')  # L2常态化接入: 可选judge_fn(config驱动,默认None=L1向后兼容
+        self._bandit_reward_count = 0  # Bandit reward采样L2校准计数器(每3次reward用1次L2))
         self._bandit = None   # P3: UCB1 adaptive routing (opt-in via bandit_switch)
         if cfg.get('bandit_switch', False) and len(self._sessions) > 1:
             try:
@@ -1057,11 +1058,13 @@ class MixinSession:
                         _qs = _eq(_ft, level='L1', llm_warn=last_chunk if isinstance(last_chunk, str) else None)
                         _reward = _qs.score
                         _jf = getattr(self, '_judge_fn', None)
-                        if _jf is not None and 0.3 <= _qs.score <= 0.5:  # Bandit reward条件L2校准: L1边界(0.3-0.5可能误判区)用L2
+                        _cnt = getattr(self, '_bandit_reward_count', 0)
+                        if _jf is not None and _cnt % 3 == 0:  # 采样L2校准: 每3次reward用L2(覆盖全range含高分区漏判,第2/4次证据)
                             try:
                                 _qs2 = _eq(_ft, level='L2', judge_fn=_jf)
                                 _reward = _qs2.score
                             except Exception: pass
+                        self._bandit_reward_count = _cnt + 1
                         self._bandit.update(idx, _reward, cost=min(1.0, len(_ft)/2000))
                     except Exception: pass
                 # P3⑥: auto checkpoint on quality event (defensive, never fail)
