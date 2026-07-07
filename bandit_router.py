@@ -60,11 +60,14 @@ class UCB1Bandit:
                 best_ucb, best_i = ucb, i
         return best_i
 
-    def update(self, arm_idx, reward):
-        """反馈 reward（归一化到 [0,1]）给 arm_idx。持久化。"""
+    def update(self, arm_idx, reward, cost=None, cost_penalty=0.15):
+        """反馈 reward（归一化到 [0,1]）给 arm_idx。可选 cost（归一化 [0,1]）做 cost-aware。"""
         if not (0 <= arm_idx < self.n_arms):
             return
         reward = max(0.0, min(1.0, float(reward)))
+        if cost is not None:
+            cost = max(0.0, min(1.0, float(cost)))
+            reward = reward * (1.0 - cost_penalty * cost)
         with _LOCK:
             self.arms[arm_idx].count += 1
             self.arms[arm_idx].total_reward += reward
