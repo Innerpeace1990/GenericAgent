@@ -971,6 +971,7 @@ class MixinSession:
         self._quality_cascade = cfg.get('quality_cascade', True)   # P2④: L1 heuristic cascade escalation (refusal/empty/strong-repetition)
         self._quality_events = 0
         self._checkpoint_switch = cfg.get('checkpoint_switch', False)  # P3⑥: auto-checkpoint on quality events
+        self._judge_fn = cfg.get('judge_fn')  # L2常态化接入: 可选judge_fn(config驱动,默认None=L1向后兼容)
         self._bandit = None   # P3: UCB1 adaptive routing (opt-in via bandit_switch)
         if cfg.get('bandit_switch', False) and len(self._sessions) > 1:
             try:
@@ -1016,7 +1017,7 @@ class MixinSession:
                 text_blocks = [b for b in return_val if isinstance(b, dict) and b.get('type') in ('text','thinking')]
                 # 有text block才评估(纯tool_use无text不评估防误判); 空text→empty_garbage触发
                 if text_blocks:
-                    qs = estimate_quality(full_text, level='L1', llm_warn=last_chunk if isinstance(last_chunk, str) else None, escalate_threshold=0.4)
+                    qs = estimate_quality(full_text, level=('L2' if getattr(self,'_judge_fn',None) else 'L1'), judge_fn=getattr(self,'_judge_fn',None), llm_warn=last_chunk if isinstance(last_chunk, str) else None, escalate_threshold=0.4)
                     if qs.suggest_escalate and qs.signals:
                         return f'cascade[{";".join(qs.signals)},score={qs.score}]'
             except Exception:
@@ -1053,7 +1054,7 @@ class MixinSession:
                     try:
                         from quality_estimator import estimate_quality as _eq
                         _ft = ''.join(b.get('text', '') for b in return_val if isinstance(b, dict) and b.get('type') == 'text')
-                        _qs = _eq(_ft, level='L1', llm_warn=last_chunk if isinstance(last_chunk, str) else None)
+                        _qs = _eq(_ft, level=('L2' if getattr(self,'_judge_fn',None) else 'L1'), judge_fn=getattr(self,'_judge_fn',None), llm_warn=last_chunk if isinstance(last_chunk, str) else None)
                         self._bandit.update(idx, _qs.score, cost=min(1.0, len(_ft)/2000))
                     except Exception: pass
                 # P3⑥: auto checkpoint on quality event (defensive, never fail)
