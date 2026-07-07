@@ -528,12 +528,24 @@ class BaseSession:
         self.api_key = cfg['apikey']
         self.api_base = cfg['apibase'].rstrip('/')
         self.model = cfg.get('model', '')
-        default_context_win = 30000
-        if 'deepseek' in self.model.lower():
-            default_context_win = 70000; self.cut_msg_interval = 25; self.trim_keep_rate = 0.3
+        # 上下文窗口默认值按官方文档匹配；可通过 cfg['context_win'] 显式覆盖
+        model_lower = self.model.lower()
+        if 'deepseek' in model_lower:
+            default_context_win = 1000000          # 官方：1M tokens
+            self.cut_msg_interval = 25
+            self.trim_keep_rate = 0.3
+        elif 'glm-5.2' in model_lower:
+            default_context_win = 1000000          # 官方：1M tokens
+        elif 'glm-5.1' in model_lower or 'glm-5' in model_lower:
+            default_context_win = 200000           # 官方：200K tokens
+        elif 'kimi' in model_lower:
+            default_context_win = 256000           # 官方：256K tokens
+        else:
+            default_context_win = 30000            # 未知模型保守值
         self.context_win = cfg.get('context_win', default_context_win)
         self.history = []; self.lock = threading.Lock(); self.system = ""
         self.name = cfg.get('name', self.model)
+        self.capabilities = cfg.get('capabilities', '')   # P1a: capability-card data source (optional; empty → model-name inference)
         proxy = cfg.get('proxy'); 
         self.proxies = {"http": proxy, "https": proxy} if proxy else None
         self.max_retries = max(0, int(cfg.get('max_retries', 4)))
@@ -955,6 +967,17 @@ class MixinSession:
         self._orig_raw_asks = [s.raw_ask for s in self._sessions]
         self._sessions[0].raw_ask = self._raw_ask
         self._cur_idx, self._switched_at = 0, 0.0
+        self._quality_switch = cfg.get('quality_switch', True)   # P0: quality-driven switch (max_tokens / malformed tool args)
+        self._quality_cascade = cfg.get('quality_cascade', True)   # P2④: L1 heuristic cascade escalation (refusal/empty/strong-repetition)
+        self._quality_events = 0
+        self._bandit = None   # P3: UCB1 adaptive routing (opt-in via bandit_switch)
+        if cfg.get('bandit_switch', False) and len(self._sessions) > 1:
+            try:
+                from bandit_router import UCB1Bandit
+                self._bandit = UCB1Bandit(len(self._sessions), namespace=cfg.get('bandit_namespace', 'default'))
+                self._cur_idx = self._bandit.select()   # 首次用 bandit 选主会话(数据驱动)
+            except Exception:
+                self._bandit = None
     def __getattr__(self, name): return getattr(self._sessions[0], name)
     _BROADCAST_ATTRS = frozenset({'system', 'tools', 'temperature', 'max_tokens', 'reasoning_effort', 'history', 'stream', 'read_timeout'})
     def __setattr__(self, name, value):
@@ -970,8 +993,34 @@ class MixinSession:
     @property
     def current_name(self): return getattr(self._sessions[self._cur_idx], 'name', None)
     def _pick(self):
+        if getattr(self, '_bandit', None):
+            return self._bandit.select()   # P3: bandit 数据驱动选模型(每次raw_ask自适应)
         if self._cur_idx and time.time() - self._switched_at > self._spring_sec: self._cur_idx = 0
         return self._cur_idx
+    def _detect_quality_issue(self, last_chunk, return_val):
+        """P0: detect response quality issues warranting a model switch. Conservative - clear signals only. Returns reason str or None."""
+        if isinstance(last_chunk, str) and '[!!! Response truncated: max_tokens' in last_chunk:
+            return 'max_tokens truncation'
+        if isinstance(return_val, list):
+            for b in return_val:
+                if isinstance(b, dict) and b.get('type') == 'tool_use':
+                    inp = b.get('input')
+                    if isinstance(inp, dict) and '_raw' in inp:
+                        return 'malformed tool args (_raw)'
+        # Cascade (P2④): L1 启发式质量估计 → 软信号(refusal/empty/强重复)低分触发升级。可开关, 保守阈值防误判
+        if getattr(self, '_quality_cascade', True) and isinstance(return_val, list):
+            try:
+                from quality_estimator import estimate_quality
+                full_text = ''.join(b.get('text', '') for b in return_val if isinstance(b, dict) and b.get('type') == 'text')
+                text_blocks = [b for b in return_val if isinstance(b, dict) and b.get('type') == 'text']
+                # 有text block才评估(纯tool_use无text不评估防误判); 空text→empty_garbage触发
+                if text_blocks:
+                    qs = estimate_quality(full_text, level='L1', llm_warn=last_chunk if isinstance(last_chunk, str) else None, escalate_threshold=0.3)
+                    if qs.suggest_escalate and qs.signals:
+                        return f'cascade[{";".join(qs.signals)},score={qs.score}]'
+            except Exception:
+                pass
+        return None
     def _raw_ask(self, *args, **kwargs):
         base, n = self._pick(), len(self._sessions)
         test_error = lambda x: isinstance(x, str) and x.lstrip().startswith(('!!!Error:', '[Error:'))
@@ -992,6 +1041,20 @@ class MixinSession:
                 elif isinstance(last_chunk, str) and '[!!! 流异常中断' in last_chunk and n > 1:
                     self._cur_idx = (idx + 1) % n; self._switched_at = time.time()
                     print(f'[MixinSession] Partial failure, next call → s{self._cur_idx} ({self._sessions[self._cur_idx].name})')
+                elif self._quality_switch and n > 1 and (reason := self._detect_quality_issue(last_chunk, return_val)):
+                    self._cur_idx = (idx + 1) % n; self._switched_at = time.time(); self._quality_events += 1
+                    print(f'[MixinSession][P0-Quality] {reason} on s{idx} ({self._sessions[idx].name}); next call → s{self._cur_idx} ({self._sessions[self._cur_idx].name}); events={self._quality_events}')
+                    try:
+                        from routing_log import log_routing as _rl
+                        _rl('quality_switch', from_model=self._sessions[idx].name, to_model=self._sessions[self._cur_idx].name, reason=reason, quality_events=self._quality_events)
+                    except Exception: pass
+                if getattr(self, '_bandit', None):   # P3: bandit reward (quality feedback to serving model)
+                    try:
+                        from quality_estimator import estimate_quality as _eq
+                        _ft = ''.join(b.get('text', '') for b in return_val if isinstance(b, dict) and b.get('type') == 'text')
+                        _qs = _eq(_ft, level='L1', llm_warn=last_chunk if isinstance(last_chunk, str) else None)
+                        self._bandit.update(idx, _qs.score)
+                    except Exception: pass
                 return return_val
             if attempt >= self._retries:
                 yield last_chunk; return return_val

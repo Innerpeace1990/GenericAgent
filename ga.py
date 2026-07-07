@@ -455,6 +455,94 @@ class GenericAgentHandler(BaseHandler):
         if self._empty_ct >= 3: return StepOutcome({}, should_exit=True)
         return StepOutcome({}, next_prompt=prompt)
 
+    def do_handoff(self, args, response):
+        """P1b: 模型主动交接给更擅长模型; handler.parent.llmclients/next_llm复用。参数: target(编号/名/关键词), reason"""
+        if not getattr(self.parent, 'enable_handoff', True):
+            yield "\u26a0\ufe0f Handoff disabled (enable_handoff=False)\n"
+            return StepOutcome(None, next_prompt="handoff_disabled")
+        if len(getattr(self.parent, 'llmclients', [])) < 2:
+            yield "\u26a0\ufe0f \u5355\u6a21\u578b\u73af\u5883 (single_model_no_handoff)\n"
+            return StepOutcome(None, next_prompt="single_model_no_handoff")
+        try:
+            p = self.parent; target = args.get('target',''); reason = args.get('reason','')
+            tl = target.lower(); target_idx = None
+            try: n = int(target); target_idx = n if 0 <= n < len(p.llmclients) else None
+            except ValueError: pass
+            if target_idx is None and tl:
+                for i, b in enumerate(p.llmclients):
+                    if isinstance(b, dict): continue
+                    nm = p.get_llm_name(b).lower(); md = p.get_llm_name(b, model=True)
+                    if tl in nm or tl in md: target_idx = i; break
+            if target_idx is None and not target:
+                target_idx = (p.llm_no + 1) % len(p.llmclients)
+            if target_idx is None:
+                yield f"\u26a0\ufe0f \u627e\u4e0d\u5230\u6a21\u578b: '{target}'\n"
+                return StepOutcome(None, next_prompt=f"handoff_target_not_found:{target}")
+            old = p.get_llm_name(p.llmclients[p.llm_no]); p.next_llm(target_idx); new = p.get_llm_name(p.llmclients[p.llm_no])
+            yield f"\U0001F504 Handoff: {old} → {new} ({reason})\n"
+            try:
+                from routing_log import log_routing as _rl
+                _rl('handoff', from_model=old, to_model=new, reason=reason)
+            except Exception: pass
+            return StepOutcome({"from": old, "to": new, "reason": reason},
+                              next_prompt=f"[Handoff] {old}→{new}。{reason}。请继续。")
+        except Exception as e:
+            return StepOutcome(None, next_prompt=f"handoff_failed:{e}")
+
+    def do_planner(self, args, response):
+        """P2⑤ Planner: 任务分解入口。提供能力清单(P1a)引导模型分解子任务并 handoff 分配。"""
+        task = (args.get('task') or args.get('content') or '').strip()
+        if not task:
+            yield "\u26a0\ufe0f planner 需要 task 参数\n"
+            return StepOutcome(None, next_prompt="planner_no_task")
+        try:
+            cards = []
+            for i, b in enumerate(getattr(self.parent, 'llmclients', [])):
+                if isinstance(b, dict): continue
+                cap = getattr(getattr(b, 'backend', None), 'capabilities', '') or '通用'
+                cards.append(f"[{i}] {self.parent.get_llm_name(b, model=False)}: {cap}")
+            if len(cards) < 2:
+                yield "\u26a0\ufe0f 单模型环境，planner 无意义\n"
+                return StepOutcome(None, next_prompt="planner_single_model")
+            yield f"\U0001F4CB Planner: 已提供能力清单，请分解任务并 handoff 分配:\n" + '\n'.join(cards) + '\n'
+            return StepOutcome({"task": task, "models": cards},
+                              next_prompt=f"[Planner] 任务'{task[:40]}'。已列出可用模型能力，请分解为子任务，用 handoff(target,reason) 把各子任务交给最擅长的模型执行。")
+        except Exception as e:
+            return StepOutcome(None, next_prompt=f"planner_failed:{e}")
+
+    def do_moa(self, args, response):
+        """P3⑨: Mixture-of-Agents. Multi-proposer parallel gen + quality scoring + aggregate. Args: query, use_aggregator(默认True)."""
+        if not getattr(self.parent, 'enable_moa', True):
+            return StepOutcome(None, next_prompt="moa_disabled")
+        query = args.get('query') or args.get('task') or args.get('content')
+        if not query:
+            yield "\u26a0\ufe0f MoA 需要 query 参数\n"
+            return StepOutcome(None, next_prompt="moa_no_query")
+        clients = getattr(self.parent, 'llmclients', [])
+        valid = [c for c in clients if c is not None and not isinstance(c, dict)]
+        if not valid:
+            yield "\u26a0\ufe0f 无可用模型\n"
+            return StepOutcome(None, next_prompt="moa_no_models")
+        try:
+            from moa import MixtureOfAgents
+            use_agg = args.get('use_aggregator', True)
+            agg_c = valid[0] if use_agg and len(valid) >= 2 else None
+            moa_inst = MixtureOfAgents(valid, aggregator_client=agg_c, max_proposers=min(3, len(valid)))
+            final, scored, meta = moa_inst.ask([{"role": "user", "content": query}])
+            if final is None:
+                yield "\u26a0\ufe0f MoA: 所有 proposer 失败\n"
+                return StepOutcome(None, next_prompt="moa_all_failed")
+            try:
+                from routing_log import log_routing as _rl
+                _rl('moa', reason=f"mode={meta.get('mode')},proposers={len(scored)},best_score={meta.get('best_score')}")
+            except Exception: pass
+            yield f"\U0001F500 MoA({meta['mode']}, {len(scored)}proposers, score={meta.get('best_score',0):.2f})\n{final}\n"
+            return StepOutcome({"final": final[:200], "proposers": len(scored), "mode": meta['mode']},
+                              next_prompt=f"[MoA] 多模型聚合完成({meta['mode']},{len(scored)}proposers)。结果已产出。")
+        except Exception as e:
+            yield f"\u26a0\ufe0f MoA失败: {e}\n"
+            return StepOutcome(None, next_prompt=f"moa_failed:{e}")
+
     def do_no_tool(self, args, response):
         '''这是一个特殊工具，由引擎自主调用，不要包含在TOOLS_SCHEMA里。
         当模型在一轮中未显式调用任何工具时，由引擎自动触发。

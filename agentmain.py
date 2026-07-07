@@ -114,6 +114,30 @@ class GenericAgent:
         if model: return b.backend.model.lower()
         return f"{type(b.backend).__name__}/{b.backend.name}"
 
+    def _build_capability_card(self):
+        """P1a: 构建多模型能力清单注入 sys_prompt，激活组合优势感知。单模型/异常返回空串(零影响)。"""
+        if not getattr(self, 'enable_capability_card', True): return ''
+        try:
+            entries = []
+            for i, b in enumerate(self.llmclients):
+                if isinstance(b, dict): continue
+                cap = getattr(b.backend, 'capabilities', '').strip()
+                if not cap:
+                    ml = b.backend.model.lower()
+                    if 'deepseek' in ml: cap = '深度推理/长上下文(1M)/代码'
+                    elif 'glm' in ml: cap = '通用对话/中文/代码'
+                    elif 'kimi' in ml: cap = '长上下文(256K)/中文'
+                    elif 'claude' in ml: cap = '代码/长任务/工具调用'
+                    elif 'gpt' in ml or ml.startswith('o'): cap = '通用推理/代码'
+                    else: cap = '通用'
+                mark = ' ←当前' if i == self.llm_no else ''
+                entries.append(f"  - [{i}] {self.get_llm_name(b)}{mark}: {cap}")
+            if len(entries) < 2: return ''
+            return (f"\n[多模型能力清单] 当前可用 {len(entries)} 个模型，可按擅长领域协作"
+                    f"(切换: /llm 或 /llm_no N):\n" + '\n'.join(entries) + '\n')
+        except Exception:
+            return ''
+
     def abort(self):
         if not self.is_running: return
         print('Abort current task...')
@@ -157,6 +181,7 @@ class GenericAgent:
             rquery = smart_format(raw_query.replace('\n', ' '), max_str_len=200)
             self.history.append(f"[USER]: {rquery}")
             sys_prompt = get_system_prompt() + '\n'.join(self.extra_sys_prompts) + getattr(self.llmclient.backend, 'extra_sys_prompt', '')
+            sys_prompt += self._build_capability_card()   # P1a: capability card
             if self.peer_hint: sys_prompt += f"\n[Peer] 用户提及其他会话/后台任务状态时: temp/model_responses/ (只找近期修改的文件尾部)\n"
             handler = GenericAgentHandler(self, self.history, os.path.join(script_dir, 'temp'))
             if getattr(self, 'no_print', False): handler.print = lambda *a, **k: None

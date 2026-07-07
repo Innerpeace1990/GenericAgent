@@ -142,6 +142,10 @@ mixin_config = {
 #     'model': 'claude-opus-4-7',                  # 或 claude-sonnet-4-6
 #     'fake_cc_system_prompt': True,               # CC 透传渠道必须置 True
 #     'thinking_type': 'adaptive',                 # 某些渠道必须要求填写thinking_type字段
+#     # ── 多智能体编排 P1a：能力卡片(可选,留空则按 model 名自动推断) ──
+#     # 'capabilities': '代码/长任务/工具调用',   # 注入 sys_prompt 的能力描述，让模型感知多模型生态
+#                                              #   空值→自动推断: deepseek=深度推理/glm=中文对话/kimi=长上下文/claude=代码
+#                                              #   详见 agentmain._build_capability_card()；多模型时自动注入清单，可用 /llm 切换协作
 # }
 
 # native_claude_config1 = {
@@ -238,7 +242,7 @@ mixin_config = {
 # native_oai_config = {
 #     'name': 'gpt-native',                           # /llms 显示名 & mixin 引用名
 #     'apikey': 'sk-<your-openai-key>',                # Bearer 鉴权
-#     'apibase': 'https://api.openai.com/v1',          # 补齐到 /v1/chat/completions
+#     'apibase': 'https://api.openai.com/v1',          # 补齐到 /v1/chat_completions
 #     'model': 'gpt-5.4',                              # gpt-5/o 系列
 #     'api_mode': 'chat_completions',                  # 'chat_completions'（默认）|'responses'
 #     # 'reasoning_effort': 'high',                    # none|minimal|low|medium|high|xhigh
@@ -251,6 +255,33 @@ mixin_config = {
 #     # 'max_tokens': 8192,                            # int 默认 8192
 #     # 'proxy': 'http://127.0.0.1:2082',              # 可选单 session HTTP 代理
 #     # 'context_win': 16000,                          # int 默认 24000；历史裁剪阈值
+# }
+
+# ── DeepSeek（OAI 兼容）示例 ───────────────────────────────────────────────
+#  变量名含 'deepseek' 时，llmcore.resolve_session 会路由到 NativeOAISession。
+#  当前 DeepSeek 官方可用模型名：deepseek-v4-pro / deepseek-v4-flash。
+#  BaseSession 对模型名含 'deepseek' 会自动放大 context_win 与裁剪阈值。
+# deepseek_pro_config = {
+#     'name': 'deepseek-pro',                          # /llms 显示名 & mixin 引用名
+#     'apikey': 'sk-<your-deepseek-key>',              # Bearer 鉴权
+#     'apibase': 'https://api.deepseek.com/v1',        # 补齐到 /v1/chat/completions
+#     'model': 'deepseek-v4-pro',
+#     'temperature': 1,
+#     'max_tokens': 8192,
+#     'max_retries': 3,
+#     'connect_timeout': 10,
+#     'read_timeout': 120,
+# }
+# deepseek_flash_config = {
+#     'name': 'deepseek-flash',
+#     'apikey': 'sk-<your-deepseek-key>',
+#     'apibase': 'https://api.deepseek.com/v1',
+#     'model': 'deepseek-v4-flash',
+#     'temperature': 1,
+#     'max_tokens': 8192,
+#     'max_retries': 3,
+#     'connect_timeout': 10,
+#     'read_timeout': 120,
 # }
 
 # ── 也可以走 Responses API ──────────────────────────────────────────────────

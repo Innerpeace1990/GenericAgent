@@ -56,7 +56,7 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         if turn%10 == 0: client.last_tools = ''  # 每10轮重置一次工具描述
         _hook('turn_before', locals())
         _hook('llm_before', locals())
-        response_gen = client.chat(messages=messages, tools=tools_schema)
+        response_gen = getattr(handler.parent, 'llmclient', client).chat(messages=messages, tools=tools_schema)
         if verbose:
             response = yield from response_gen
             yield '\n\n'
