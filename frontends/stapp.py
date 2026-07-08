@@ -20,13 +20,47 @@ from continue_cmd import handle_frontend_command, reset_conversation, list_sessi
 from btw_cmd import handle_frontend_command as btw_handle_frontend
 from export_cmd import last_assistant_text, export_to_temp, wrap_for_clipboard
 
-st.set_page_config(page_title="Cowork", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Cowork", layout="centered", initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
-[data-testid="stBottom"]{position:fixed!important;bottom:0!important;left:0!important;right:0!important;width:100vw!important;z-index:999;background:var(--background-color,#fff)}
-@media (min-width:768px){[data-testid="stSidebar"][aria-expanded="true"]~div [data-testid="stBottom"]{left:300px!important;width:calc(100vw - 300px)!important}}
-.stMainBlockContainer{padding-bottom:10rem!important}
+/* ═══ GA 浏览器版 UI 优化：A=居中布局 / B=侧边栏不遮挡 / C=输入框自适应 / D=美化 ═══ */
+
+/* D：隐藏页脚水印与背景渐变装饰，界面更干净（保留右上角菜单） */
+footer{visibility:hidden!important}
+#stAppDecorationContainer{display:none!important}
+
+/* B：输入框容器 —— 移除旧的「position:fixed + width:100vw」写法。
+   旧写法把输入框强制铺满整个视口、脱离文档流，因此无视侧边栏占位、导致遮挡。
+   改用 Streamlit 原生 sticky（贴底），并随主内容列流动：侧边栏展开时主列被推右，输入框天然跟随、绝不被遮挡。wide / centered 双模式通用。 */
+[data-testid="stBottom"]{
+    position:sticky!important;
+    bottom:0!important;
+    z-index:999!important;
+    background:var(--background-color,#ffffff)!important;
+    box-sizing:border-box!important;
+    border-top:1px solid rgba(128,128,128,0.15);
+}
+/* 双保险：即便用户手动开启 wide 模式，输入框宽度也始终跟随主列、居中，不溢出到侧边栏下方 */
+[data-testid="stBottom"] [data-testid="stBottomBlockContainer"]{max-width:100%!important;margin-left:auto!important;margin-right:auto!important}
+
+/* 防止最后一条消息被输入框遮挡 */
+.stMainBlockContainer{padding-bottom:7rem!important}
+
+/* C：输入框自适应 —— 文本域随内容自动增高（Streamlit 原生支持），达上限后内部滚动；宽度贴合列宽 */
+textarea[data-testid="stChatInputTextArea"]{
+    min-height:54px!important;
+    max-height:220px!important;
+    resize:none!important;
+    line-height:1.5!important;
+}
+
+/* D：输入框圆角与轻阴影美化 */
+[data-testid="stBottomBlockContainer"] > div,
+[data-testid="stChatInput"] > div:first-child{
+    border-radius:14px!important;
+    box-shadow:0 2px 10px rgba(0,0,0,0.10)!important;
+}
 </style>
 """, unsafe_allow_html=True)
 

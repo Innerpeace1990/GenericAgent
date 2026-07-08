@@ -9,6 +9,103 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from agent_loop import BaseHandler, StepOutcome, json_default
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
+# ===== GA 浏览器账户隔离全局配置 =====
+# 目标：Generic Agent 只允许通过「GA 账户」profile 的 Chrome 操作浏览器，
+#       禁止访问/控制主账户（Default）的任何信息。
+# 关键原理：tmwd_cdp_bridge 扩展是 profile 作用域的——它装在哪个 profile，
+#           GA 就只能控制该 profile 的标签页。因此把扩展只装到 GA profile 即可实现隔离。
+GA_BROWSER_PROFILE = "Profile 1"  # 用户新建的免登录 GA 账户 profile 目录名
+GA_BROWSER_USER_DATA_DIR = r"C:\Users\wangx\AppData\Local\Google\Chrome\User Data"
+GA_BROWSER_CHROME_EXE = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+GA_BROWSER_EXTENSION_PATH = os.path.join(script_dir, "assets", "tmwd_cdp_bridge")
+GA_BROWSER_STARTUP_URL = "https://example.com"
+GA_BROWSER_LAUNCH_TIMEOUT = 20  # 启动后等待扩展连接的秒数
+
+
+def _is_chrome_running():
+    """检测是否有任何 chrome.exe 进程在运行（主账户或 GA 均算）。"""
+    try:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0
+        r = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq chrome.exe", "/NH"],
+            capture_output=True, text=True, startupinfo=si, timeout=5)
+        return "chrome.exe" in r.stdout.lower()
+    except Exception:
+        return False
+
+
+def _is_extension_registered_in_profile(profile_name=GA_BROWSER_PROFILE):
+    """检查目标 profile 的 Secure Preferences 中是否已经注册 tmwd_cdp_bridge 扩展。"""
+    try:
+        prefs_path = os.path.join(GA_BROWSER_USER_DATA_DIR, profile_name, "Secure Preferences")
+        if not os.path.exists(prefs_path):
+            return False
+        with open(prefs_path, "r", encoding="utf-8") as f:
+            prefs = json.load(f)
+        for eid, info in prefs.get("extensions", {}).get("settings", {}).items():
+            if "tmwd_cdp_bridge" in str(info.get("path", "")) or "tmwd_cdp_bridge" in str(info.get("manifest", {}).get("name", "")):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def ensure_ga_browser(driver):
+    """确保 GA 浏览器（GA_BROWSER_PROFILE）已启动且扩展已连接。
+    路由逻辑：
+      a) 没有任何 Chrome 在运行 -> 启动 GA profile 浏览器并加载扩展（独立新进程）；
+      b) 已有 GA 浏览器连接（driver 有会话）-> 直接复用，不做任何操作；
+      c) 只有主账户浏览器打开 -> 用 --profile-directory 打开 GA profile 窗口，
+         由于扩展已持久化在 GA profile，会自动加载并连接。
+    返回 True 表示已有可用会话。
+    """
+    if not driver:
+        return False
+    if driver.get_all_sessions():
+        return True  # 情况 b：已有 GA 扩展连接，直接复用
+
+    cmd = [
+        GA_BROWSER_CHROME_EXE,
+        f"--user-data-dir={GA_BROWSER_USER_DATA_DIR}",
+        f"--profile-directory={GA_BROWSER_PROFILE}",
+        "--new-window",  # 强制新窗口：Chrome 单实例下，已运行时必须 --new-window 才会为指定 profile 开窗
+    ]
+    # 若扩展尚未在目标 profile 注册，则通过 --load-extension 预加载；
+    # 若已注册，重复加载会冲突，因此不再附加此参数。
+    if not _is_extension_registered_in_profile():
+        cmd.append(f"--load-extension={GA_BROWSER_EXTENSION_PATH}")
+    # 始终附带启动 URL：扩展不会在 about:blank/新标签页等内部页加载（service worker 不激活），
+    # 必须打开真实页面才能触发扩展连接；Chrome 已运行时尤为关键（否则命令被单实例忽略、只开空白标签页）
+    cmd.append(GA_BROWSER_STARTUP_URL)
+    try:
+        subprocess.Popen(
+            cmd, shell=False,
+            creationflags=0x08000000 if os.name == 'nt' else 0)
+        safe_print(f"已启动/激活 GA 浏览器: profile={GA_BROWSER_PROFILE}")
+    except Exception as e:
+        safe_print(f"启动 GA 浏览器失败: {e}")
+        return False
+
+    for _ in range(GA_BROWSER_LAUNCH_TIMEOUT):
+        time.sleep(1)
+        if driver.get_all_sessions():
+            return True
+    safe_print(f"GA 浏览器扩展未在 {GA_BROWSER_LAUNCH_TIMEOUT}s 内连接")
+    return False
+
+
+def _ensure_driver_and_browser():
+    """初始化 driver 并确保 GA 浏览器可用；浏览器被关闭后能自动重连。"""
+    global driver
+    if driver is None:
+        first_init_driver()
+    elif not driver.get_all_sessions():
+        safe_print("GA 浏览器会话断开，尝试重新激活...")
+        ensure_ga_browser(driver)
+
+
 def safe_print(*args, **kwargs):
     try: print(*args, **kwargs)
     except: pass
@@ -108,11 +205,7 @@ def first_init_driver():
     global driver
     from TMWebDriver import TMWebDriver
     driver = TMWebDriver()
-    for i in range(7):
-        time.sleep(2)
-        sess = driver.get_all_sessions()
-        if len(sess) > 0: break
-        if i == 4: webbrowser.open("https://example.com")
+    ensure_ga_browser(driver)
 
 def web_scan(tabs_only=False, switch_tab_id=None, text_only=False, maxlen=35000):
     """获取当前页面的简化HTML内容和标签页列表。注意：简化过程会过滤边栏、浮动元素等非主体内容。
@@ -121,7 +214,7 @@ def web_scan(tabs_only=False, switch_tab_id=None, text_only=False, maxlen=35000)
     应当多用execute_js，少全量观察html"""
     global driver
     try:
-        if driver is None: first_init_driver()
+        _ensure_driver_and_browser()
         if len(driver.get_all_sessions()) == 0:
             return {"status": "error", "msg": "没有可用的浏览器标签页，查L3记忆分析原因。"}
         tabs = []
@@ -168,7 +261,7 @@ def web_execute_js(script, switch_tab_id=None, no_monitor=False):
     """执行 JS 脚本来控制浏览器，并捕获结果和页面变化"""
     global driver
     try:
-        if driver is None: first_init_driver()
+        _ensure_driver_and_browser()
         if len(driver.get_all_sessions()) == 0: return {"status": "error", "msg": "没有可用的浏览器标签页，查L3记忆分析原因。"}
         if switch_tab_id: driver.default_session_id = switch_tab_id
         result = simphtml.execute_js_rich(script, driver, no_monitor=no_monitor)

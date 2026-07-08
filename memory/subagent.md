@@ -4,7 +4,7 @@
 
 ### --func 纯函数模式
 - `python agentmain.py --func prompt.txt [--llm_no N]`（cwd=代码根）
-- 读prompt文件→执行→结果写`prompt.out.txt`→退出，主agent读完可删
+- 读prompt文件→执行→结果写`{prompt文件名去掉.txt}.out.txt`（例：prompt.txt → prompt.out.txt）→退出，主agent读完可删
 - 后台启动(print PID)，加`--nobg`前台同步等结果
 - 适用：单次任务、并行map、不需要追问的场景
 

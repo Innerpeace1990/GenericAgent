@@ -86,6 +86,8 @@ web_execute_js script='{"cmd": "batch", "commands": [...]}'
     - 瞬态input的核心是**缩短发现→setFileInputFiles时间窗**：优先同batch完成；再不行用DOM事件监听；猴子补丁仅作兜底思路
   - ⚠tabId：CDP默认sender.tab.id(当前注入页)，跨tab需显式tabId或先batch内tabs查
 - ⭐跨tab无需前台：指定tabId即可操作后台标签页
+- ⭐读其他tab的DOM(验证页面状态，无需switch)：`{cmd:'cdp', tabId:N, method:'Runtime.evaluate', params:{expression:'(function(){...})()', returnByValue:true}}`。注意 `web_execute_js` 的 `switch_tab_id` 参数实测不生效(JS仍在原tab跑)，跨tab一律用此 CDP Runtime.evaluate。
+- 新建标签页(绕弹窗拦截)：CDP `{cmd:'cdp', method:'Target.createTarget', params:{url:'...'}}` 返回 targetId（能用）；但 `{method:'Target.closeTarget'}` 报 `"Not allowed"`，且桥无关闭tab命令 → 清理测试tab改用 `Page.navigate`→`about:blank`。
 
 ## CDP点击完整生命周期（✅已验证）
 - 通用点击需**三事件序列**：mouseMoved → mousePressed → mouseReleased（间隔50-100ms）
@@ -150,3 +152,8 @@ web_scan失败时按序排查（自动检测优先，用户参与放最后）：
 ③扩展没装？→读Chrome用户目录下`Secure Preferences`→`extensions.settings`中找`path`含`tmwd_cdp_bridge`的条目
   找到→扩展已装，排查其他原因；没找到→走web_setup_sop
 ④以上都正常仍连不上→请求用户协助
+
+## 启动指定 profile 窗口的坑（已验证，2026-07-08）
+- Chrome **单实例**：已有 Chrome 运行时，`chrome --user-data-dir=X --profile-directory=Y`（无 `--new-window` 且无真实 URL）会被忽略，只在现有 profile 进程里开一个新标签页，**目标 profile 窗口不会真正打开**。
+- 扩展(MV3)**不在 about:blank / 新标签页等内部页加载**（service worker 不激活）→ 即便开窗也连不上 WS（实测 30s 内 0 连接）。
+- 正确启动命令：**必须同时** `--new-window` + 真实 URL（如 `https://example.com`），无论 Chrome 是否已在运行（见 ga.py `ensure_ga_browser`）。

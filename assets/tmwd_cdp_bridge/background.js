@@ -78,6 +78,11 @@ async function handleExtMessage(msg, sender) {
         await chrome.management.setEnabled(msg.extId, true);
         return { ok: true };
       }
+      if (msg.method === 'uninstallSelf') {
+        // 账户隔离用途：从当前 profile 卸载本扩展自身（如从主账户移除 GA 扩展）
+        await chrome.management.uninstallSelf();
+        return { ok: true };
+      }
       return { ok: false, error: 'Unknown method: ' + msg.method };
     } catch (e) { return { ok: false, error: e.message }; }
   }

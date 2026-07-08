@@ -161,8 +161,8 @@ LLM_PROVIDERS = [
                 'key': '_plan', 'label': '选择 Coding Plan',
                 'type': 'choice',
                 'options': [
-                    {'id': 'native_claude', 'name': 'Coding Plan CN (Anthropic)', 'desc': 'open.bigmodel.cn，推荐国内用户', 'apibase': 'https://open.bigmodel.cn/api/anthropic', 'fake_cc_system_prompt': False},
-                    {'id': 'native_oai', 'name': 'Coding Plan Global (OAI)', 'desc': 'api.z.ai，OpenAI 协议，全球可用', 'apibase': 'https://api.z.ai/api/paas/v4'},
+                    {'id': 'native_claude', 'name': 'Coding Plan CN (Anthropic)', 'desc': 'open.bigmodel.cn，推荐国内用户', 'apibase': 'https://open.bigmodel.cn/api/anthropic', 'fake_cc_system_prompt': False, 'type': 'native_claude'},
+                    {'id': 'native_oai', 'name': 'Coding Plan Global (OAI)', 'desc': 'api.z.ai，OpenAI 协议，全球可用', 'apibase': 'https://api.z.ai/api/paas/v4', 'type': 'native_oai'},
                 ],
             },
         ],
@@ -757,6 +757,8 @@ def configure_llm(provider):
     print(f"{C['cyan']}{'─'*60}{C['reset']}")
 
     cfg = dict(provider['template'])
+    # 默认继承 provider 的协议类型，避免 _var_type_info 回退到 native_oai
+    cfg.setdefault('type', provider.get('type', 'native_oai'))
 
     # API Key（密文输入）
     cfg['apikey'] = ask_input(
