@@ -101,6 +101,20 @@
 
 ---
 
+### 1.6 通用坑点：浏览器扩展 CDP session 竞态（2026-07-08 根治 SessionInfo 报错）
+
+| 字段 | 内容 |
+|------|------|
+| **适用环境** | GA 浏览器扩展 `assets/tmwd_cdp_bridge/background.js`（Manifest V3 service worker + chrome.debugger CDP）；2026-07-08 验证 |
+| **症状** | 自主任务运行中突然跳出 `Bad message format` + `Tried to use SessionInfo before it was initialized`，时有时无、过一会才发现 |
+| **关键经验** | chrome.debugger 每次操作是 `attach→sendCommand→detach` 瞬态 session；MV3 service worker 会休眠/重启，重启后 session 状态丢失；高频并发调用下 sendCommand 在 attach 未就绪时执行 → Chrome 运行时抛上述错误。错误信息经 `{ok:false,error:e.message}` 原样转发，所以 **GA 全栈源码搜不到这两个字符串（搜不到≠不存在，是运行时原生错误）**。 |
+| **修复** | 全局 CDP 互斥锁（Promise 队列串行化）+ session/bad message 错误单次重试（detach→reattach）。commit `ae0c502`，备份在 `background.js.bak` |
+| **裁剪指引** | 报错在源码搜不到时，考虑运行时/扩展/依赖库原生错误经 e.message 转发；MV3 扩展的并发状态操作（session/连接）需互斥锁；改扩展需本环境无 Node 时用「file_patch精确匹配+Python等价测试+括号比例对比+人工审查」替代 node --check |
+| **相关 SOP** | `tmwebdriver_sop`（CDP 操作） |
+| **状态** | 有效 |
+
+---
+
 ## 2. 通用验证检查清单（按模型裁剪后使用）
 
 > 以下清单不是每次都要全做，需根据当前模型条目的“适用环境”裁剪。
@@ -121,6 +135,7 @@
 | 2026-07-07 | Agent | 创建本文档，沉淀 GLM 国内 Coding Plan 配置错配教训 | 无 |
 | 2026-07-07 | Agent | 新增 DeepSeek 与通用上下文窗口默认值错配条目 | `BaseSession` 的 30000 fallback 导致 GLM/Kimi 上下文被低估 |
 | 2026-07-08 | Agent | 新增 1.5 质量评估与鲁棒性盲区条目（模型覆盖补测发现） | qe L1 无法检测思考泄漏；kimi 被强制 temp=1 无法作 temp=0 judge；注入鲁棒性差异(glm盲从/kimi+ds-pro拒绝) |
+| 2026-07-08 | Agent | 新增 1.6 浏览器扩展 CDP session 竞态条目（根治 SessionInfo 报错） | chrome.debugger 瞬态 session + MV3 service worker 休眠重启 → 并发竞态；错误经 e.message 转现（源码搜不到字符串）
 
 ---
 
@@ -131,3 +146,4 @@
 | v1.0 | 2026-07-07 | 创建可裁剪框架；记录 GLM 国内 Coding Plan 和 Kimi 备用模型经验教训 | 用户要求模型经验教训文档化，强调非万能模板、环境边界、审计周期 | Agent |
 | v1.1 | 2026-07-07 | 新增 DeepSeek 模型经验；记录 BaseSession 默认 30000 上下文窗口错配问题 | 用户发现 DeepSeek 官方 1M 上下文未正确配置，同时排查 GLM/Kimi 也存在同样错配 | Agent |
 | v1.2 | 2026-07-08 | 新增 1.5 质量评估与鲁棒性盲区条目（qe L1盲区/judge temp限制/注入鲁棒性差异/Bandit归因污染） | 用户要求逐模型逐场景补测模型覆盖盲区(36格26P+10C) | Agent |
+| v1.3 | 2026-07-08 | 新增 1.6 浏览器扩展 CDP session 竞态条目（根治 SessionInfo 报错，commit ae0c502） | 用户同意沉淀 CDP session 竞态修复经验 | Agent |
