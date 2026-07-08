@@ -1,4 +1,22 @@
 // background.js - Cookie + CDP Bridge
+
+// Global CDP mutex: prevent concurrent attach/detach/sendCommand races
+// across MV3 service worker restarts and multiple concurrent callers.
+let cdpQueue = Promise.resolve();
+function withCDP(fn) {
+  return cdpQueue = cdpQueue.then(async () => {
+    try {
+      return await fn();
+    } catch (e) {
+      throw e;
+    }
+  });
+}
+function isCDPSessionError(e) {
+  const msg = ((e && e.message) || '').toLowerCase();
+  return msg.includes('session') || msg.includes('not attached') || msg.includes('debugger') || msg.includes('bad message');
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log('CDP Bridge installed');
   // Strip CSP headers to allow eval/inline scripts
@@ -104,50 +122,79 @@ async function handleCookies(msg, sender) {
 }
 
 async function handleBatch(msg, sender) {
-  const R = [];
-  let attached = null;
-  const resolve$N = (params) => JSON.parse(JSON.stringify(params || {}).replace(/"\$(\d+)\.([^"]+)"/g,
-    (_, i, path) => { let v = R[+i]; for (const k of path.split('.')) v = v[k]; return JSON.stringify(v); }));
-  try {
-    for (const c of msg.commands) {
-      if (c.tabId === undefined && msg.tabId !== undefined) c.tabId = msg.tabId;
-      if (c.cmd === 'cookies') {
-        R.push(await handleCookies(c, sender));
-      } else if (c.cmd === 'tabs') {
-        const tabs = (await chrome.tabs.query({})).filter(t => isScriptable(t.url));
-        R.push({ ok: true, data: tabs.map(t => ({ id: t.id, url: t.url, title: t.title, active: t.active, windowId: t.windowId })) });
-      } else if (c.cmd === 'cdp') {
-        const tabId = c.tabId || msg.tabId || sender.tab?.id;
-        if (attached !== tabId) {
-          if (attached) { await chrome.debugger.detach({ tabId: attached }); attached = null; }
-          await chrome.debugger.attach({ tabId }, '1.3');
-          attached = tabId;
+  return await withCDP(async () => {
+    const R = [];
+    let attached = null;
+    const resolve$N = (params) => JSON.parse(JSON.stringify(params || {}).replace(/"\$(\d+)\.([^"]+)"/g,
+      (_, i, path) => { let v = R[+i]; for (const k of path.split('.')) v = v[k]; return JSON.stringify(v); }));
+    try {
+      for (const c of msg.commands) {
+        if (c.tabId === undefined && msg.tabId !== undefined) c.tabId = msg.tabId;
+        if (c.cmd === 'cookies') {
+          R.push(await handleCookies(c, sender));
+        } else if (c.cmd === 'tabs') {
+          const tabs = (await chrome.tabs.query({})).filter(t => isScriptable(t.url));
+          R.push({ ok: true, data: tabs.map(t => ({ id: t.id, url: t.url, title: t.title, active: t.active, windowId: t.windowId })) });
+        } else if (c.cmd === 'cdp') {
+          const tabId = c.tabId || msg.tabId || sender.tab?.id;
+          if (attached !== tabId) {
+            if (attached) { await chrome.debugger.detach({ tabId: attached }); attached = null; }
+            await chrome.debugger.attach({ tabId }, '1.3');
+            attached = tabId;
+          }
+          try {
+            R.push(await chrome.debugger.sendCommand({ tabId }, c.method, resolve$N(c.params)));
+          } catch (err) {
+            if (isCDPSessionError(err)) {
+              console.warn('[TMWD-CDP] batch retry after:', err.message);
+              try { await chrome.debugger.detach({ tabId }); } catch (_) {}
+              attached = null;
+              await chrome.debugger.attach({ tabId }, '1.3');
+              attached = tabId;
+              R.push(await chrome.debugger.sendCommand({ tabId }, c.method, resolve$N(c.params)));
+            } else {
+              throw err;
+            }
+          }
+        } else {
+          R.push({ ok: false, error: 'unknown cmd: ' + c.cmd });
         }
-        R.push(await chrome.debugger.sendCommand({ tabId }, c.method, resolve$N(c.params)));
-      } else {
-        R.push({ ok: false, error: 'unknown cmd: ' + c.cmd });
       }
+      if (attached) await chrome.debugger.detach({ tabId: attached });
+      return { ok: true, results: R };
+    } catch (e) {
+      if (attached) try { await chrome.debugger.detach({ tabId: attached }); } catch (_) {}
+      return { ok: false, error: e.message, results: R };
     }
-    if (attached) await chrome.debugger.detach({ tabId: attached });
-    return { ok: true, results: R };
-  } catch (e) {
-    if (attached) try { await chrome.debugger.detach({ tabId: attached }); } catch (_) {}
-    return { ok: false, error: e.message, results: R };
-  }
+  });
 }
 
 async function handleCDP(msg, sender) {
   const tabId = msg.tabId || sender.tab?.id;
   if (!tabId) return { ok: false, error: 'no tabId' };
-  try {
-    await chrome.debugger.attach({ tabId }, '1.3');
-    const result = await chrome.debugger.sendCommand({ tabId }, msg.method, msg.params || {});
-    await chrome.debugger.detach({ tabId });
-    return { ok: true, data: result };
-  } catch (e) {
-    try { await chrome.debugger.detach({ tabId }); } catch (_) {}
-    return { ok: false, error: e.message };
-  }
+  return await withCDP(async () => {
+    try {
+      await chrome.debugger.attach({ tabId }, '1.3');
+      let result;
+      try {
+        result = await chrome.debugger.sendCommand({ tabId }, msg.method, msg.params || {});
+      } catch (err) {
+        if (isCDPSessionError(err)) {
+          console.warn('[TMWD-CDP] single retry after:', err.message);
+          try { await chrome.debugger.detach({ tabId }); } catch (_) {}
+          await chrome.debugger.attach({ tabId }, '1.3');
+          result = await chrome.debugger.sendCommand({ tabId }, msg.method, msg.params || {});
+        } else {
+          throw err;
+        }
+      }
+      await chrome.debugger.detach({ tabId });
+      return { ok: true, data: result };
+    } catch (e) {
+      try { await chrome.debugger.detach({ tabId }); } catch (_) {}
+      return { ok: false, error: e.message };
+    }
+  });
 }
 // Filter out chrome:// and other internal tabs that can't be scripted
 const isScriptable = url => url && /^https?:/.test(url);
@@ -295,22 +342,38 @@ async function handleWsExec(data) {
     if (res && !res.ok && res.csp) {
       console.log('[TMWD-WS] CDP fallback for tab', tabId);
       const wrappedCode = buildCdpScript(data.code);
-      try {
-        await chrome.debugger.attach({ tabId }, '1.3');
-        const cdpRes = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
-          expression: wrappedCode, awaitPromise: true, returnByValue: true
-        });
-        await chrome.debugger.detach({ tabId });
-        if (cdpRes.exceptionDetails) {
-          const desc = cdpRes.exceptionDetails.exception?.description || 'CDP Error';
-          res = { ok: false, error: { name: 'Error', message: desc, stack: desc } };
-        } else {
-          res = cdpRes.result.value;
+      res = await withCDP(async () => {
+        try {
+          await chrome.debugger.attach({ tabId }, '1.3');
+          let cdpRes;
+          try {
+            cdpRes = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
+              expression: wrappedCode, awaitPromise: true, returnByValue: true
+            });
+          } catch (err) {
+            if (isCDPSessionError(err)) {
+              console.warn('[TMWD-CDP] fallback retry after:', err.message);
+              try { await chrome.debugger.detach({ tabId }); } catch (_) {}
+              await chrome.debugger.attach({ tabId }, '1.3');
+              cdpRes = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
+                expression: wrappedCode, awaitPromise: true, returnByValue: true
+              });
+            } else {
+              throw err;
+            }
+          }
+          await chrome.debugger.detach({ tabId });
+          if (cdpRes.exceptionDetails) {
+            const desc = cdpRes.exceptionDetails.exception?.description || 'CDP Error';
+            return { ok: false, error: { name: 'Error', message: desc, stack: desc } };
+          } else {
+            return cdpRes.result.value;
+          }
+        } catch (cdpErr) {
+          try { await chrome.debugger.detach({ tabId }); } catch (_) {}
+          return { ok: false, error: { name: 'Error', message: 'CDP fallback failed: ' + cdpErr.message, stack: '' } };
         }
-      } catch (cdpErr) {
-        try { await chrome.debugger.detach({ tabId }); } catch (_) {}
-        res = { ok: false, error: { name: 'Error', message: 'CDP fallback failed: ' + cdpErr.message, stack: '' } };
-      }
+      });
     }
     // Grace period for async tab creation (e.g. link click with target=_blank)
     if (newTabIds.size === 0) await new Promise(r => setTimeout(r, 200));
