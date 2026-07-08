@@ -40,28 +40,33 @@ class MixtureOfAgents:
                 pass
         return self.proposers
 
-    def _propose_one(self, client, messages, out, idx):
-        try:
-            resp = ""
-            # 纯生成模式：不传 tools，避免 proposer 调工具（聚合阶段才综合）
-            gen = client.chat(messages=messages, tools=[])
-            for ch in gen:
-                if isinstance(ch, str):
-                    resp += ch
-            with self._lock:
-                out[idx] = resp if resp.strip() else None
-            # P3⑦ 集成: 自动记录 token 消耗到 ORM (用 client.model 作 key; token 粗估)
-            if self.orm is not None:
-                try:
-                    be = getattr(client, 'backend', client)
-                    model = getattr(be, 'model', getattr(client, 'name', 'unknown'))
-                    in_t = sum(len(str(m.get('content', ''))) // 4 for m in messages)
-                    self.orm.record(model, in_t, max(1, len(resp) // 4), 0.0)
-                except Exception:
-                    pass
-        except Exception:
-            with self._lock:
-                out[idx] = None
+    def _propose_one(self, client, messages, out, idx, retries=1):
+        """单 proposer 生成，含 retry(1次) 容错。失败则 out[idx]=None（score 阶段过滤）。"""
+        for attempt in range(retries + 1):
+            try:
+                resp = ""
+                # 纯生成模式：不传 tools，避免 proposer 调工具（聚合阶段才综合）
+                gen = client.chat(messages=messages, tools=[])
+                for ch in gen:
+                    if isinstance(ch, str):
+                        resp += ch
+                with self._lock:
+                    out[idx] = resp if resp.strip() else None
+                # P3⑦ 集成: 自动记录 token 消耗到 ORM (用 client.model 作 key; token 粗估)
+                if self.orm is not None:
+                    try:
+                        be = getattr(client, 'backend', client)
+                        model = getattr(be, 'model', getattr(client, 'name', 'unknown'))
+                        in_t = sum(len(str(m.get('content', ''))) // 4 for m in messages)
+                        self.orm.record(model, in_t, max(1, len(resp) // 4), 0.0)
+                    except Exception:
+                        pass
+                return  # 成功则返回
+            except Exception:
+                if attempt < retries:
+                    continue  # 重试一次
+                with self._lock:
+                    out[idx] = None
 
     @staticmethod
     def _build_agg_prompt(user_msg, proposals):
@@ -84,12 +89,13 @@ class MixtureOfAgents:
         proposers = self._get_proposers()
         out = [None] * len(proposers)
         threads = []
+        PER_PROPOSER_TIMEOUT = 90  # 秒：单个 proposer 超时阈值，防止某模型卡死阻塞整体（P0容错加固）
         for i, c in enumerate(proposers):
-            t = threading.Thread(target=self._propose_one, args=(c, messages, out, i))
+            t = threading.Thread(target=self._propose_one, args=(c, messages, out, i), daemon=True)
             threads.append(t)
             t.start()
         for t in threads:
-            t.join()
+            t.join(timeout=PER_PROPOSER_TIMEOUT)  # 超时则跳过该 proposer (out[idx] 保持 None, score阶段过滤)
         # Phase 2: score（过滤空/失败）
         scored = []
         for i, txt in enumerate(out):
@@ -97,6 +103,16 @@ class MixtureOfAgents:
                 qs = estimate_quality(txt, level=self.judge_level)
                 scored.append((i, txt, qs))
         if not scored:
+            # P0容错: 全失败时用主模型(proposers[0])单答，保证不返回 None 阻塞调用方
+            try:
+                resp = ""
+                for ch in proposers[0].chat(messages=messages, tools=[]):
+                    if isinstance(ch, str):
+                        resp += ch
+                if resp.strip():
+                    return resp, [], {'reason': 'fallback_single_model', 'best_score': 0.0}
+            except Exception:
+                pass
             return None, [], {'reason': 'all_proposers_failed'}
         # Phase 3: aggregate
         user_msg = next((m.get('content', '') for m in messages if m.get('role') == 'user'), '')
