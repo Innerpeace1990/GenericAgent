@@ -96,3 +96,9 @@
 - 优选kimi作judge(agentmain _cj,commit 43e3dc1), temperature=0确定性输出
 - 双向系统流验证: 好输出0.50不误判 + 坏输出0.20触发cascade
 - 之前deepseek作judge保守(0.1-0.2)因能力局限, prompt调优无效, 换更强judge模型解决
+
+## [QE最新(24commits)]
+- verbosity penalty 0.3->0.1(7e02e38): 好verbose不再误扣(0.70→0.90), Bandit under-reward修复
+- low_density信号(废话词>=3→扣0.6, f443aa2): 差verbose仍检测(0.90→0.30), false-negative修复
+- 第16次L1不可靠: 过度扣分类型(verbosity把0.90质量扣到0.70)
+- 双向验证PASS+集成回归6/6
