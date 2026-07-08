@@ -22,6 +22,7 @@
 - 当前 Windows 环境启用了系统代理；pip 安装时必须显式绕过代理，否则会出现 `ProxyError` / `SSLEOFError`。
 - 经验证可用的命令模板：`pip install --proxy= -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn <package>`。
 - 用 Python `requests` 访问 GitHub API/raw 时也会因系统代理触发 `SSLEOFError`；已验证方案：设置 `os.environ['HTTPS_PROXY']=''` 并在 `requests.get(..., proxies={'http': None, 'https': None})` 中显式禁用。
+- 学术调研 API 限流：Semantic Scholar（`api.semanticscholar.org`）免费层高频访问易触发 HTTP 429（需间隔重试或换源）；arXiv API 查询禁用 `OR`/`+`（导致空结果），用简洁关键词。
 
 ## [Browser / Chrome Environment]
 - 存在本地 WebDriver/自动化桥接服务：HTTP `127.0.0.1:18766`，WebSocket `127.0.0.1:18765`。

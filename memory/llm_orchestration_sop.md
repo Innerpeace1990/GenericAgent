@@ -299,7 +299,7 @@
 | P2 ⑤ Planner-Executor | ✅ 已实施(轻量) | 真实 dispatch 4/4 | `do_planner` 工具：提供能力清单(P1a)引导分解+handoff分配；Evaluator 由④覆盖、Executor 由②③覆盖，三部分完整（非完整 plan 架构，属入口级落地） |
 | P3 Bandit 自适应路由 | ✅ 已实施 | 收敛 4/4 | `bandit_router.py`(UCB1+状态持久化+线程安全，6/6) + MixinSession 接入(`__init__` 初始化+`_pick` 数据驱动 select+`_raw_ask` reward 反馈)；30 轮收敛 m0:m1=26:4，真正数据驱动选模型，`bandit_switch` 开关 |
 | P3 ⑨ MoA 多智能体聚合 | ✅ 已实施+真实质量验证 | 真实质量对比通过 | `moa.py`(三阶段+aggregator prompt优化+过滤QE<0.3防污染)+`do_moa`(orm/动态clients感知handoff)。**真实适用边界**:复杂任务L1分数持平(0.70=0.70)但L2 judge揭示MoA(0.60)<best_solo(0.70)真实更差;多视角任务完整输出验证MoA=best(0.95=0.95)持平(注:截断输出会假报<best,完整输出才可靠);简单任务MoA≤best(aggregator自身缺陷);修复前0.00(refusal)→修复后0.30/0.70(永不更差)。QE分数持平≠无价值,MoA价值在信息综合 |
-| 故障鲁棒性验证 | ✅ 6/6 全过 | 注入测试通过 | MoA: proposer异常→优雅降级/全失败→None/refusal→QE降分; MixinSession: 全!!!Error→有限重试max_retries不无限循环/空响应不崩溃/主坏备用好→failover级联容错。现有异常处理健全，无需加固 |
+| 故障鲁棒性验证 | ✅ 加固后6/6+5单元测试 | 注入测试+P0加固 | MoA(P0加固,commit3c0dbf7): join加timeout(90s)/daemon防卡死阻塞+propose加retry(1次)+全失败fallback主模型单答(不再返None);**根因教训**:此前曾因某模型卡住致join无限等待→工具超时→无提示中断(原"无需加固"结论被推翻);5单元测试全绿(正常/retry/fallback/timeout不阻塞)。MixinSession: 全!!!Error→有限重试max_retries不无限循环/空响应不崩溃/主坏备用好→failover级联容错 |
 | cost-aware MoA gate | ✅ 已实施+真实验证 | dispatch 4/4 + 真实PASS | `moa_gate.py`(复杂度评估:长度+复杂/简单关键词+very_short,阈值0.3) + `do_moa`前置gate。真实验证:简单任务(你好)gate拒绝省100%API成本,复杂任务(二分查找代码)gate放行MoA QE=0.70不降质 |
 | P3 ⑥ 状态检查点 | ✅ 已实施(轻量) | 端到端 PASS | `state_checkpoint.py` save/load/delete(MixinSession session快照) + auto checkpoint(`checkpoint_switch`,质量切换时自动保存至json) |
 | P3 ⑦ Orch-RM 资源调度 | ✅ 已实施(轻量) | 8/8 | `orchestrator_rm.py`: 核心编排层 token 预算追踪 + RPM/TPM 限流 + 日预算配额决策（与前端 `cost_tracker` 区分；当前不碰现有流程，作为基础设施，后续 Bandit/Handoff 可调用） |
