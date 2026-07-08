@@ -38,6 +38,7 @@
 - 专用 SSH 密钥：`C:\Users\wangx\.ssh\id_github_genericagent`
 - 因 Windows 默认使用系统 OpenSSH，Git 已配置 `core.sshCommand` 指向 Git for Windows 自带的 `ssh.exe`，否则新密钥的权限修复不生效。
 - 当前分支：`main`，已与 fork 的 `main` 同步。
+- `.gitignore` 规则 `memory/*`（L37）忽略整个 memory 目录：已用 `git add -f` 纳入版本控制的 memory 文件（各 SOP）修改后可正常 commit；**新建 memory 文件必须 `git add -f`** 才能纳入版本控制（普通 `git add` 会被忽略而漏提交）。
 
 ## [LLM Orchestration]
 - 当前后端：主模型 `zhipu-glm`（国内 Coding Plan，Anthropic 协议）+ 备用模型 `kimi`（端点 `https://api.kimi.com/coding/v1`），固定顺序故障转移。
