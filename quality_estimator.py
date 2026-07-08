@@ -74,6 +74,14 @@ def _sig_meta_commentary(text: str) -> bool:
     matches = sum(1 for p in patterns if p.lower() in text.lower())
     return matches >= 2
 
+def _sig_low_density(text: str) -> bool:
+    """P2修复: 检测低信息密度/废话填充词(啰嗦但无实质)。"""
+    patterns = ['让我们详细', '让我们深入', '首先', '总之', '希望以上', '希望这个解释',
+                '如果还有疑问', '欢迎继续', '值得深入', '这个问题确实', '值得我们',
+                '多方面因素', '综合考虑', '谢谢']
+    matches = sum(1 for p in patterns if p in text)
+    return matches >= 3
+
 def _sig_language_mismatch(text: str, expected_lang: str = 'zh') -> bool:
     """P2修复: 检测输出语言与预期不匹配（如要求中文但输出英文）。"""
     if expected_lang == 'zh':
@@ -139,6 +147,8 @@ def estimate_quality(
                 signals.append('verbosity'); score -= 0.1  # P2校准: 0.3→0.1防过度扣分(L1把0.90质量扣到0.70→Bandit under-reward好模型)
             if _sig_meta_commentary(response_text):
                 signals.append('meta_commentary'); score -= 0.4
+            if _sig_low_density(response_text):
+                signals.append('low_density'); score -= 0.6
             if _sig_language_mismatch(response_text):
                 signals.append('language_mismatch'); score -= 0.4
         score = max(0.0, score)
