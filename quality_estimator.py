@@ -136,7 +136,7 @@ def estimate_quality(
             if _sig_refusal(response_text):
                 signals.append('refusal'); score -= 0.5
             if _sig_verbosity(response_text):
-                signals.append('verbosity'); score -= 0.3
+                signals.append('verbosity'); score -= 0.1  # P2校准: 0.3→0.1防过度扣分(L1把0.90质量扣到0.70→Bandit under-reward好模型)
             if _sig_meta_commentary(response_text):
                 signals.append('meta_commentary'); score -= 0.4
             if _sig_language_mismatch(response_text):
