@@ -30,15 +30,31 @@
   - Chrome 启动参数 `--load-extension=...`（持久化，推荐）
   - chrome://extensions 开发者模式 → "加载已解压的扩展程序"（当前会话已验证，截至 2026-07-06 已加载）
 - 若扩展未加载，则 `web_scan`/`web_execute_js` 等工具无法枚举/操作标签页。
+- 【账户隔离 v2，2026-07-08 验证+修复】Generic Agent 只允许通过 GA 账户 profile 的 Chrome 操作浏览器，禁止触碰主账户。3场景全通过：①无Chrome→自动起Profile1(命令含--profile-directory=Profile 1)；②GA已开→复用不重开窗；③主账户(Default)开着→自动开新GA窗口且web_scan**只返回Profile1标签页、绝不混入主账户标签页**(隔离机制有效)。
+  - User Data: `C:\Users\wangx\AppData\Local\Google\Chrome\User Data`；chrome.exe: `C:\Program Files\Google\Chrome\Application\chrome.exe`
+  - `Default`=主账户(Bryan, wang.xudong1990@gmail.com)；`Profile 1`=GA免登录账户（用户手动 load-unpacked 安装扩展）。
+  - 扩展 `tmwd_cdp_bridge` **只装于 Profile 1**（已从 Default 卸载）；扩展是 profile 作用域，装哪个 profile 就只能控哪个 profile 的标签页 → 这是隔离的根本机制。
+  - ga.py 全局变量：`GA_BROWSER_PROFILE="Profile 1"`、`GA_BROWSER_USER_DATA_DIR`、`GA_BROWSER_CHROME_EXE`；`ensure_ga_browser()` 路由3场景：①无浏览器→启动GA profile；②GA已连接→复用；③只有主账户运行→打开新GA窗口。web_scan/web_execute_js 经 `_ensure_driver_and_browser()` 自动调用。
+  - ⚠️关键坑：①改 ga.py 后必须**重启 agent 进程**（`import ga` 被Python缓存，旧工具不更新）；②扩展已注册的 profile 启动时**不能**再加 `--load-extension`（会导致Chrome启动失败，已验证）。
+  - ⚠️【场景③根因+修复，2026-07-08】ensure_ga_browser 曾在"Chrome已运行"时漏掉 `--new-window` 和真实URL，导致命令被Chrome单实例忽略、只在现有profile开新标签页→扩展不连接→web_scan报"没有可用的浏览器标签页"。**已修复**：启动命令**始终**含 `--new-window` + `GA_BROWSER_STARTUP_URL`(=example.com)。根因两坑：③Chrome单实例下 `chrome --profile-directory=X`(无--new-window无URL)被忽略；④扩展(MV3)**不在 about:blank/新标签页等内部页加载**(service worker不激活，实测30s内0连接)，必须开真实页面才触发WS连接。
+  - Default 卸载扩展后 Secure Preferences 残留空 `{}` 条目（无path/manifest/state，受Chrome HMAC+super_mac完整性保护）→ **无害**（Chrome不加载、chrome.management.getAll()不列出、不影响隔离）；**禁止手动删该JSON条目**，否则可能触发Chrome重置Default真实扩展(AdBlock/Wallet/Adobe等)。已与用户确认保留。
+- 【Chrome "由贵组织管理"根因，2026-07-08】"由贵组织管理"提示**不是**tmwd扩展导致的，而是 HKLM\SOFTWARE\Policies\Google\Chrome\LocalNetworkAccessAllowedForUrls 注册表策略，其值是[*.singlewindow.cn]等中国海关/单一窗口类网站（报关软件安装的企业策略）。2026-07-08已将该策略键清理（备份于 D:\generic-agent\temp\chrome_policy_backup_20260708.reg），Chrome重启后"由贵组织管理"提示应消失。其他Google注册表策略路径(ProgramData\Google\Chrome\Policies)无残留。
 
 ## [Git / GitHub]
 - 本地主仓库根目录：`D:\generic-agent`
-- GitHub fork 地址：`https://github.com/Innerpeace1990/GenericAgent`
+- 官方上游仓库：`https://github.com/lsdefine/GenericAgent`（13.3K★，main 分支）
+- 本地 fork 地址：`https://github.com/Innerpeace1990/GenericAgent`（0★，私有副本）
 - 本地仓库 remote origin：`git@github.com:Innerpeace1990/GenericAgent.git`（SSH）
 - 专用 SSH 密钥：`C:\Users\wangx\.ssh\id_github_genericagent`
 - 因 Windows 默认使用系统 OpenSSH，Git 已配置 `core.sshCommand` 指向 Git for Windows 自带的 `ssh.exe`，否则新密钥的权限修复不生效。
-- 当前分支：`main`，已与 fork 的 `main` 同步。
+- 当前分支：`main`；本地领先 fork 的 `main` 31 个提交；官方上游最新 commit 为 `7200d0e8`（2026-07-07），本地落后官方上游 3 个提交（共同祖先 `eff6802b`）。
 - `.gitignore` 规则 `memory/*`（L37）忽略整个 memory 目录：已用 `git add -f` 纳入版本控制的 memory 文件（各 SOP）修改后可正常 commit；**新建 memory 文件必须 `git add -f`** 才能纳入版本控制（普通 `git add` 会被忽略而漏提交）。
+
+## [GA Code Upgrade]
+- 升级 SOP：`../memory/code_upgrade_sop.md`（v1.0，2026-07-08）
+- 当前 TUI 版本状态：README 主推 `frontends/tuiapp_v2.py`（Textual TUI v2）；最新官方 TUI 功能提交为 `frontends/tuiapp_v2.py` 的 `worldline` 回溯（2026-07-07）。
+- 网络注意：Git HTTPS fetch（`https://github.com/lsdefine/GenericAgent.git`）在当前系统代理下会被 `Connection reset`；SSH fetch 可用；Python `requests` 访问 GitHub API 时需显式禁用代理（`proxies={'http':None,'https':None}`），否则 `SSLEOFError`。
+- 升级风险：本地有 31 个定制提交（11 纯新增 + 5 核心文件改动 + 2 其他）。官方 3 个新增提交改动 12 个文件，包含 `agent_loop.py` 和 `llmcore.py`，需人工处理潜在冲突。
 
 ## [LLM Orchestration]
 - 当前后端：主模型 `zhipu-glm`（国内 Coding Plan，Anthropic 协议）+ 备用模型 `kimi`（端点 `https://api.kimi.com/coding/v1`），固定顺序故障转移。

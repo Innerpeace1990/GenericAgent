@@ -1,0 +1,7 @@
+{
+  "schedule": "09:00",
+  "repeat": "weekly",
+  "enabled": true,
+  "prompt": "【每周升级检查】\n1. 执行 git fetch upstream（检查官方上游是否有新提交）\n2. 若有新提交：用 git merge-tree 只读预览冲突文件，输出冲突评估报告\n3. 根据 code_upgrade_sop.md 评估变更类型（标准/正常/紧急）和风险等级\n4. 若有冲突且涉及核心定制文件(ga.py/llmcore.py/agent_loop.py/agentmain.py/tools_schema.json)，标记为\"需人工确认\"\n5. 若无冲突或仅非核心文件冲突，建议可自动合并\n6. 输出结论到报告文件，内容包含：上游新提交列表、冲突文件清单、风险等级、建议操作\n7. 仅在风险等级为\"低\"且无核心文件冲突时，自动执行合并（必须先创建备份tag）\n8. 合并后执行验证（preflight check + 核心模块 import 测试）\n注意：检查报告中必须提醒 code_upgrade_sop.md 的备份周期——超过30天无问题的升级备份tag可清理",
+  "max_delay_hours": 12
+}

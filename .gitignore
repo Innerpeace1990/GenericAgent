@@ -116,6 +116,9 @@ memory/L4_raw_sessions/*
 # Code Review Principles
 !memory/code_review_principles.md
 
+# Code Upgrade / Lifecycle SOP
+!memory/code_upgrade_sop.md
+
 # Review Mode SOP
 !memory/review_sop.md
 
@@ -151,3 +154,12 @@ frontends/conductor_im_plugins/*
 
 # 本地 bug / 局限报告草稿（交给维护者参考，不进仓库）
 /BUG_*.md
+
+# 本地备份目录（升级备份，不入库）
+backups/
+
+# 临时备份文件
+*.bak
+
+# preflight 自检报告（运行时生成，不入库）
+ga_preflight_check_report.json
