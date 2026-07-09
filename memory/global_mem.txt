@@ -9,6 +9,7 @@
 - 提高信息密度：输出简洁、结论前置、结构化表达，避免冗余和重复解释。
 - 所有规则必须定期复盘，做好版本管理，标记失效时间和替代方案；对用户指令和引入的资源也要批判性评估，不照单全收。
 - 优先借鉴顶级咨询公司、世界500强、国际标准化委员会（ISO/IEC/ITU）及 PMI、PRINCE2、DevOps、安全、合规、需求管理等全球前沿行业知识体系，并思考实践。
+- 当用户询问跨平台聊天群/会话消息时，倾向于直接并行处理多个平台，而非逐一确认平台。
 - 已学习并评估的外部资源：
   - Stanford OVAL STORM：LLM 驱动的研究写作流水线，可借鉴其模块化 LLM 流程和检索增强思想；对本地 OS 操作型 Agent 不直接适用，但可用于复杂研究型任务。
   - Andrej Karpathy LLM Wiki：三层知识库（Raw sources/Wiki/Schema）与 Ingest/Query/Lint 工作流，高度契合 Generic Agent 的记忆系统；已引入"Schema 层"和"记忆 Lint"机制。
@@ -94,10 +95,16 @@
 
 ## [Feishu Bot]
 - 应用 ID：`cli_aaa40214f638dbd8`
-- 项目路径：`D:\generic-agent\temp\feishu-bot`
-- LLM 后端：Kimi API，兼容端点 `https://api.kimi.com/coding/v1`
-- 公网隧道：ngrok 二进制路径 `C:\Users\wangx\AppData\Local\ngrok\ngrok.exe`（通过 `start_webhook_ngrok_real.py` 启动）
-- 注意：ngrok 公网 URL 会随进程重启变化，属于易变状态，不记录具体 URL；每次启动后从 `webhook_ngrok_status.json` 读取。
+- 应用名：王旭东的飞书 CLI
+- 项目路径：`D:\generic-agent`（飞书前端：`frontends/fsapp.py`）
+- 当前运行模式：**长连接（WebSocket）**，通过 `lark_oapi` 的 `ws.Client` 实现
+- 事件订阅方式：**使用长连接接收事件**（2026-07-09 已改并发布）
+- 旧 Webhook + ngrok 方案：已弃用，ngrok 隧道 URL 已失效
+- 运行状态：需保持 `frontends/fsapp.py` 进程存活；当前需手动启动，建议配置持久化（自启动/看门狗）
+- 日志文件：`D:\generic-agent\logs\fsapp.log`（UTF-16 编码）
+- 事件订阅互斥规则：后台「事件配置」与「回调配置」的订阅方式必须分别与代码实现一致；消息类事件（`im.message.receive_v1`）在「事件配置」中。
+- 教训：长连接/Webhook 二选一，代码演进时必须同步更新后台配置与 SOP。详见 `../memory/lessons_feishu_integration.md`。
+- 【群消息监控+总结能力 v1.0，2026-07-09】`frontends/fs_group.py`（工具模块）+ `fsapp.py`（持久化+命令）已上线。`list_chats`/`list_messages`/`summarize_chat`/`search_messages`/`save_message`，真实 API 验证通过（2 个群 + 真实消息）。飞书命令 `/chats /summary /search`；Agent 可经 code_run 调用。SDK 关键：`item.sender.id`/`item.msg_type`/`item.body.content`。详见 `../memory/feishu_group_sop.md`。
 
 ## [WeCom AiBot / 企业微信智能机器人]
 - 项目路径：`D:\generic-agent\temp\wecom_aibot_bot`
