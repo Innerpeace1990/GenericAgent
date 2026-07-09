@@ -45,6 +45,13 @@ REGRESSION_TESTS = [
         "needs_api": False,
         "special": "skills",
     },
+    # offline：交叉验证管道自测（纯本地）
+    {
+        "name": "cross_validation",
+        "path": None,
+        "needs_api": False,
+        "special": "cross_validation",
+    },
     # online：多智能体全链路集成（6 场景，真实 API）
     {
         "name": "multiagent_integration",
@@ -101,6 +108,19 @@ def run_test(spec) -> dict:
         except Exception as e:
             result["passed"] = False
             result["error"] = f"skills: {e}"
+            return result
+    # 特殊：直接 import cross_validation 自测
+    if spec.get("special") == "cross_validation":
+        try:
+            from memory.cross_validation import selftest
+            r = selftest()
+            ok = all(v == "ok" for v in r.values())
+            result["passed"] = ok
+            result["output"] = f"{sum(v=='ok' for v in r.values())}/{len(r)} checks passed"
+            return result
+        except Exception as e:
+            result["passed"] = False
+            result["error"] = f"cross_validation: {e}"
             return result
     path = spec.get("path")
     args = spec.get("args", [])
