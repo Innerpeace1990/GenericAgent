@@ -9,6 +9,9 @@ import traceback
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import *
 
+# 飞书群消息监控与总结模块
+from frontends.fs_group import save_message, set_credentials, list_chats, list_messages, summarize_chat, find_chat_by_name, search_messages
+
 
 def _ensure_dir(path):
     path = Path(path)
@@ -352,6 +355,27 @@ def _feishu_config():
 APP_ID, APP_SECRET, ALLOWED_USERS, PUBLIC_ACCESS, CONFIG_PATH = _feishu_config()
 
 
+FEISHU_EXTRA_PROMPT = """
+【飞书智能体行为规范 - 2026-07-09】
+1. 输出格式：回复用户时使用"卡片式 Markdown"布局，清晰分块、易读，与飞书 UI 协调。规则：
+   - 用 emoji 图标作为模块标题前缀，粗体标题，模块之间用 --- 分隔线隔开。
+   - 推荐模块（按内容选用，不必全部）：📌 核心结论 / 📢 通知公告 / 💡 洞察建议 / 📊 关键数据速查 / ✅ 待办与跟进 / ⚠️ 注意事项。
+   - 多用列表(•/-)和短句，避免大段文字；关键数据/金额/日期加粗或用反引号。
+   - 开头先用一句话给结论，再展开分块。
+2. 群总结范围（重要）：当用户要求"总结群/总结消息/群动态"等时，【只总结飞书群】的消息，【不要包含企业微信群(WeCom)】的任何内容。即使你能看到或联想到企业微信群的讨论，也必须忽略，只基于飞书群信息作答。若飞书群无新消息，如实说明，不要用企业微信群内容凑数。
+3. 【NEW! 飞书群消息能力 - 你已装备】
+   你现在拥有通过 `frontends/fs_group.py` 提供的飞书群消息工具函数（已导入，可直接通过 code_run 调用）：
+   - `fs_group.list_chats()` → 列出机器人所在全部群（含 chat_id、群名、成员数）
+   - `fs_group.list_messages(chat_id, limit=50)` → 拉取指定群的历史消息（按时间倒序）
+   - `fs_group.summarize_chat(chat_id, limit=50, hours=24)` → 拉取群消息并整理成可总结文本
+   - `fs_group.find_chat_by_name(keyword)` → 按群名关键词查找 chat_id
+   - `fs_group.save_message(...)` → 收到群消息时自动持久化到 data/feishu_messages/
+   - `fs_group.search_messages(keyword, hours=24)` → 跨群按关键词搜索持久化消息
+   当用户要求"总结群消息/拉取群历史/查看群聊"时，先调用上面的工具函数获取信息，再基于数据做总结。无需用户手动转发消息。
+4. 浏览器隔离意识：你（飞书智能体）与本地 GA 主进程【共享同一个 Chrome 浏览器实例】。当你调用 web_scan / web_execute_js 时，看到的标签页可能是 GA 主进程打开的，与你的任务无关。除非用户的任务明确需要联网查询，否则不要主动使用浏览器工具，避免被无关标签页干扰。
+"""
+
+
 def get_agent():
     global agent, agent_error, agent_thread
     with agent_lock:
@@ -361,6 +385,9 @@ def get_agent():
             raise RuntimeError(agent_error)
         try:
             agent = GeneraticAgent()
+            # 注入飞书专用行为规范（卡片格式 + 企业微信过滤）
+            if hasattr(agent, 'extra_sys_prompts'):
+                agent.extra_sys_prompts.append(FEISHU_EXTRA_PROMPT)
             agent_thread = threading.Thread(target=agent.run, daemon=True)
             agent_thread.start()
             return agent
@@ -793,6 +820,68 @@ class FeishuApp(AgentChatMixin):
                 self.agent._turn_end_hooks.pop(hook_key, None)
             self.user_tasks.pop(chat_id, None)
 
+    async def handle_command(self, chat_id, cmd, **ctx):
+        """飞书群消息命令：/chats /summary /find /search，其余转发给父类"""
+        parts = (cmd or "").split()
+        op = (parts[0] if parts else "").lower()
+        if op == "/chats":
+            r = await asyncio.to_thread(list_chats)
+            if r.get("error"):
+                return await self.send_text(chat_id, f"❌ 获取群列表失败: {r['error']}", **ctx)
+            chats = r.get("chats", [])
+            if not chats:
+                return await self.send_text(chat_id, "机器人当前不在任何群中（或缺少 im:chat 权限）。", **ctx)
+            lines = [f"📌 机器人所在群（共 {len(chats)} 个）："]
+            for ch in chats:
+                lines.append(f"• {ch.get('name', '(未命名)')} | {ch['chat_id']} | 成员{ch.get('member_count', '?')}")
+            lines.append("\n💡 用法: /summary <chat_id 或群名> [条数] [小时数]")
+            return await self.send_text(chat_id, "\n".join(lines), **ctx)
+        if op == "/summary":
+            if len(parts) < 2:
+                return await self.send_text(chat_id, "用法: /summary <chat_id 或群名> [条数，默认50] [小时数]\n示例: /summary oc_xxx 100 24\n用 /chats 查看群列表", **ctx)
+            target = parts[1]
+            limit = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 50
+            hours = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
+            if target.startswith("oc_"):
+                r = await asyncio.to_thread(summarize_chat, chat_id=target, limit=limit, hours=hours)
+            else:
+                r = await asyncio.to_thread(summarize_chat, chat_name=target, limit=limit, hours=hours)
+            if r.get("error"):
+                return await self.send_text(chat_id, f"❌ 拉取消息失败: {r['error']}", **ctx)
+            text = r.get("text", "")
+            return await self.send_text(chat_id, text, **ctx)
+        if op == "/find":
+            if len(parts) < 2:
+                return await self.send_text(chat_id, "用法: /find <群名关键词>\n返回匹配的 chat_id 列表", **ctx)
+            kw = parts[1]
+            r = await asyncio.to_thread(find_chat_by_name, kw)
+            if r.get("error"):
+                return await self.send_text(chat_id, f"❌ 查找失败: {r['error']}", **ctx)
+            matches = r.get("matches", [])
+            if not matches:
+                return await self.send_text(chat_id, f"未找到名称含「{kw}」的群。用 /chats 查看全部。", **ctx)
+            lines = [f"🔍 含「{kw}」的群："]
+            for m in matches:
+                lines.append(f"• {m['name']} | {m['chat_id']}")
+            return await self.send_text(chat_id, "\n".join(lines), **ctx)
+        if op == "/search":
+            if len(parts) < 2:
+                return await self.send_text(chat_id, "用法: /search <关键词> [小时数]\n在已持久化的消息中搜索（仅含收到后的消息）", **ctx)
+            kw = parts[1]
+            hours = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 24
+            try:
+                hits = await asyncio.to_thread(search_messages, kw, None, hours)
+            except Exception as e:
+                return await self.send_text(chat_id, f"❌ 搜索失败: {e}", **ctx)
+            if not hits:
+                return await self.send_text(chat_id, f"近 {hours} 小时未找到含「{kw}」的持久化消息。", **ctx)
+            lines = [f"🔍 找到 {len(hits)} 条含「{kw}」的消息："]
+            for h in hits[:30]:
+                lines.append(f"• [{h.get('chat_id', '?')[:12]}] {h.get('sender_name') or h.get('sender_id', '?')}: {(h.get('text') or '')[:60]}")
+            return await self.send_text(chat_id, "\n".join(lines), **ctx)
+        # 其余命令（/help /stop /llm 等）交给父类处理
+        return await super().handle_command(chat_id, cmd, **ctx)
+
 
 def get_app():
     global app
@@ -820,6 +909,19 @@ def handle_message(data):
         print(f"未授权用户: {open_id}")
         return
     user_input, image_paths = _build_user_message(message)
+    # 持久化收到的消息到 data/feishu_messages/（群消息 chat_id 非空，单聊为空）
+    try:
+        save_message(
+            chat_id=chat_id or None,
+            chat_name=getattr(getattr(message, "chat_name", None), "chat_name", None),
+            message_id=message_id,
+            msg_type=message.message_type,
+            sender_id=open_id,
+            sender_name=getattr(getattr(sender, "sender_id", None), "name", None),
+            text=user_input,
+        )
+    except Exception:
+        traceback.print_exc()
     if not user_input:
         if chat_id:
             send_message(chat_id, f"⚠️ 暂不支持处理此类飞书消息：{message.message_type}", receive_id_type="chat_id")
@@ -850,6 +952,7 @@ def main():
     if not APP_ID or not APP_SECRET:
         print(f"错误: 请在 mykey 配置中填写 fs_app_id 和 fs_app_secret\n配置文件: {CONFIG_PATH}", flush=True)
         sys.exit(1)
+    set_credentials(APP_ID, APP_SECRET)  # 初始化群消息工具 SDK 凭证
     handler = lark.EventDispatcherHandler.builder("", "").register_p2_im_message_receive_v1(handle_message).build()
     retry_delay = 5
     while True:
