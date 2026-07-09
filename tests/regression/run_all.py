@@ -13,14 +13,52 @@ GA_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file
 sys.path.insert(0, GA_ROOT)
 
 REGRESSION_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMP_DIR = os.path.join(GA_ROOT, "temp")
 RESULTS_FILE = os.path.join(GA_ROOT, "temp", "regression_results.json")
 
 
+def _find(name_candidates, *dirs):
+    """在多个目录中按候选名查找文件。"""
+    for d in dirs:
+        for n in name_candidates:
+            p = os.path.join(d, n)
+            if os.path.exists(p):
+                return p
+    return None
+
+
 # 回归测试注册表
+#   needs_api=True 表示该测试会发起真实 LLM API 调用（耗时/耗成本），
+#   默认（safe 模式）跳过，仅 --full 时运行。
 REGRESSION_TESTS = [
-    # (模块名, 路径)
-    ("test_fault_injection", os.path.join(REGRESSION_DIR, "test_fault_injection.py")),
-    ("test_multiagent_integration", os.path.join(REGRESSION_DIR, "test_multiagent_integration.py")),
+    # offline：SOP 对抗评估（不调用 API，评估内置响应）
+    {
+        "name": "sop_adversarial_eval",
+        "path": _find(["sop_adversarial_eval.py"], TEMP_DIR, REGRESSION_DIR),
+        "needs_api": False,
+        "args": ["--dry-run"],
+    },
+    # offline：3 个 Skill 自测（纯本地）
+    {
+        "name": "skill_selftests",
+        "path": None,  # 特殊：直接 import
+        "needs_api": False,
+        "special": "skills",
+    },
+    # online：多智能体全链路集成（6 场景，真实 API）
+    {
+        "name": "multiagent_integration",
+        "path": _find(["multiagent_integration_test.py", "test_multiagent_integration.py"],
+                      TEMP_DIR, REGRESSION_DIR),
+        "needs_api": True,
+    },
+    # online：故障注入鲁棒性（真实 API）
+    {
+        "name": "fault_injection",
+        "path": _find(["fault_injection_test.py", "test_fault_injection.py"],
+                      TEMP_DIR, REGRESSION_DIR),
+        "needs_api": True,
+    },
 ]
 
 # 目前从 temp/ 直接引用
@@ -38,22 +76,59 @@ def load_report(filepath):
     return None
 
 
-def run_test(name, path) -> dict:
-    """执行一个测试脚本并捕获输出。"""
+def run_test(spec) -> dict:
+    """执行一个测试脚本并捕获输出。spec 为 REGRESSION_TESTS 中的条目。"""
+    name = spec["name"]
     result = {
         "name": name,
-        "path": path,
+        "path": spec.get("path"),
+        "needs_api": spec.get("needs_api", False),
         "passed": False,
         "output": "",
         "error": None,
     }
+    # 特殊：直接 import skill 自测
+    if spec.get("special") == "skills":
+        try:
+            from memory.skills.web_deep_browse.skill import selftest as t1
+            from memory.skills.feishu_group.skill import selftest as t2
+            from memory.skills.fsapp_health.skill import health_check
+            r1, r2 = t1(), t2()
+            health_check()
+            result["passed"] = True
+            result["output"] = f"web_deep_browse={len(r1)}keys feishu_group={len(r2)}keys fsapp_health=ok"
+            return result
+        except Exception as e:
+            result["passed"] = False
+            result["error"] = f"skills: {e}"
+            return result
+    path = spec.get("path")
+    args = spec.get("args", [])
+    if not path:
+        result["error"] = "no path"
+        return result
     try:
         with open(path, 'r', encoding='utf-8') as f:
             code = f.read()
-        exec_globals = {"__name__": "__main__", "__file__": path}
-        exec(code, exec_globals)
+        # 注入 argv（如 --dry-run）
+        old_argv = sys.argv
+        sys.argv = [path] + list(args)
+        out_buf = []
+        import io, contextlib
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as sout:
+                exec_globals = {"__name__": "__main__", "__file__": path}
+                exec(code, exec_globals)
+                out_buf.append(sout.getvalue())
+        finally:
+            sys.argv = old_argv
         result["passed"] = True
-        result["output"] = os.path.join(GA_ROOT, "temp", f"{name}_output.txt")
+        result["output"] = (out_buf[0] or "")[-500:]
+        return result
+    except SystemExit as e:
+        # sop_adversarial_eval 在不达标时 sys.exit(1)
+        result["passed"] = (e.code == 0)
+        result["error"] = f"exit code {e.code}" if e.code else None
         return result
     except Exception as e:
         result["passed"] = False
@@ -61,27 +136,33 @@ def run_test(name, path) -> dict:
         return result
 
 
-def run_all() -> list:
-    """运行所有回归测试。"""
+def run_all(full: bool = False) -> list:
+    """运行所有回归测试。full=True 时包含需 API 的在线测试。"""
     results = []
-    for name, path in REGRESSION_TESTS:
+    for spec in REGRESSION_TESTS:
+        name = spec["name"]
         print(f"Running: {name}...", end=" ")
-        if os.path.exists(path):
-            r = run_test(name, path)
+        if spec.get("needs_api") and not full:
+            r = {"name": name, "passed": None, "error": "skipped (needs_api, use --full)",
+                 "needs_api": True}
+            print("SKIP (online)")
+        elif not spec.get("path") and not spec.get("special"):
+            r = {"name": name, "passed": None, "error": "File not found"}
+            print("SKIP (File not found)")
+        else:
+            r = run_test(spec)
             status = "PASS" if r["passed"] else f"FAIL ({r['error']})"
             print(status)
-        else:
-            r = {"name": name, "passed": None, "error": f"File not found: {path}"}
-            print(f"SKIP ({r['error']})")
         results.append(r)
     return results
 
 
 def main():
+    full = "--full" in sys.argv
     timestamp = datetime.datetime.now().isoformat()
 
     print("=" * 60)
-    print(f"GA Regression Test Suite")
+    print(f"GA Regression Test Suite  {'[FULL]' if full else '[SAFE — offline only]'}")
     print(f"Timestamp: {timestamp}")
     print(f"Root: {GA_ROOT}")
     print("=" * 60)
@@ -93,7 +174,7 @@ def main():
         print(f"  {baseline.get('passed', 0)}/{baseline.get('total', 0)} passed")
 
     print()
-    results = run_all()
+    results = run_all(full=full)
     passed = sum(1 for r in results if r.get("passed") is True)
     failed = sum(1 for r in results if r.get("passed") is False)
     skipped = sum(1 for r in results if r.get("passed") is None)
