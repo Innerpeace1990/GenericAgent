@@ -26,6 +26,7 @@ from pathlib import Path
 
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import ListChatRequest, ListMessageRequest
+from lark_oapi.api.contact.v3 import GetUserRequest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data" / "feishu_messages"
@@ -80,14 +81,71 @@ def _get_client():
 
 
 # ─────────────────────────────────────────────────────────
+# 发言人姓名解析 contact.user.get
+# ─────────────────────────────────────────────────────────
+_NAME_CACHE = {}
+
+
+def resolve_sender_name(open_id, sender_type=None):
+    """解析单个发送者的显示名。
+
+    优先级：app→🤖机器人；否则调 contact.user.get 取 name/en_name/nickname。
+    受限于应用权限，可能返回 None（此时调用方应做"成员N"降级）。
+    结果带缓存（含 None，避免重复请求）。
+    """
+    if sender_type == "app" or not open_id:
+        return "🤖机器人" if sender_type == "app" else None
+    if open_id in _NAME_CACHE:
+        return _NAME_CACHE[open_id]
+    name = None
+    try:
+        client = _get_client()
+        req = GetUserRequest.builder().user_id(open_id).user_id_type("open_id").build()
+        resp = client.contact.v3.user.get(req)
+        if resp.success() and resp.data and resp.data.user:
+            u = resp.data.user
+            name = getattr(u, "name", None) or getattr(u, "en_name", None) or getattr(u, "nickname", None) or None
+    except Exception:
+        pass
+    _NAME_CACHE[open_id] = name  # None 也缓存
+    return name
+
+
+def build_sender_map(messages):
+    """为一批消息构建 open_id→显示名 的映射。
+
+    拿到真名的用真名；拿不到的统一分配稳定编号"成员1/成员2…"（按首次出现顺序）。
+    """
+    seen = []
+    id_set = set()
+    for m in messages:
+        if (m.get("sender_type") or "") == "app":
+            continue
+        sid = m.get("sender_id") or ""
+        if sid and sid not in id_set:
+            id_set.add(sid)
+            seen.append(sid)
+    name_map = {}
+    member_idx = 0
+    for sid in seen:
+        real = resolve_sender_name(sid)
+        if real:
+            name_map[sid] = real
+        else:
+            member_idx += 1
+            name_map[sid] = f"成员{member_idx}"
+    return name_map
+
+
+# ─────────────────────────────────────────────────────────
 # 群列表 chat.list
 # ─────────────────────────────────────────────────────────
 def list_chats(page_size: int = 100, max_pages: int = 10):
     """列出机器人所在的所有群。
 
     Returns:
-        list[dict]: 每个元素含 chat_id, name, chat_mode, owner_id_id,
-                    owner_id_type, member_count, member_id_type, description, external
+        dict: {"chats": [...], "count": N}，每个元素含 chat_id, name, chat_mode,
+              member_count, description, external, owner_id
         若出错返回 {"error": "..."}
     """
     client = _get_client()
@@ -121,7 +179,7 @@ def list_chats(page_size: int = 100, max_pages: int = 10):
         pages += 1
         if not has_more or not page_token:
             break
-    return chats
+    return {"chats": chats, "count": len(chats)}
 
 
 def find_chat_by_name(keyword: str, page_size: int = 100):
@@ -130,21 +188,22 @@ def find_chat_by_name(keyword: str, page_size: int = 100):
     Args:
         keyword: 群名包含的关键词
     Returns:
-        list[dict]: 匹配的群（结构同 list_chats 元素）
+        dict: {"chats": [...], "count": N}；若 list_chats 出错返回 {"error": "..."}
     """
     kw = (keyword or "").strip().lower()
-    chats = list_chats(page_size=page_size)
-    if isinstance(chats, dict) and "error" in chats:
-        return chats
+    res = list_chats(page_size=page_size)
+    if isinstance(res, dict) and "error" in res:
+        return res
+    chats = res.get("chats", []) if isinstance(res, dict) else res
     if not kw:
-        return chats
+        return {"chats": chats, "count": len(chats)}
     matched = []
     for c in chats:
         name = (c.get("name") or "").lower()
         desc = (c.get("description") or "").lower()
         if kw in name or kw in desc:
             matched.append(c)
-    return matched
+    return {"chats": matched, "count": len(matched)}
 
 
 # ─────────────────────────────────────────────────────────
@@ -398,9 +457,10 @@ def summarize_chat(chat_id: str = None, chat_name: str = None, limit: int = 50,
     # 1. 解析 chat_id
     resolved_name = chat_name
     if not chat_id and chat_name:
-        matches = find_chat_by_name(chat_name)
-        if isinstance(matches, dict) and "error" in matches:
-            return matches
+        found = find_chat_by_name(chat_name)
+        if isinstance(found, dict) and "error" in found:
+            return found
+        matches = found.get("chats", []) if isinstance(found, dict) else found
         if not matches:
             return {"error": f"未找到群名包含 '{chat_name}' 的群"}
         if len(matches) > 1:
@@ -432,14 +492,28 @@ def summarize_chat(chat_id: str = None, chat_name: str = None, limit: int = 50,
         used_source = "mixed"
 
     base = local_msgs if local_msgs else api_msgs
+    # 过滤系统通知消息（加群/退群/设置变更等），这类无对话内容且无有效发送者
+    base = [m for m in base if (m.get("msg_type") or "") != "system"]
+    # 构建发言人友好名映射（真名优先，否则"成员N"），彻底避免显示 OU-A9A 这类代码
+    name_map = build_sender_map(base)
     # 统一字段，时间正序
     normalized = []
     for m in base:
+        stype = m.get("sender_type") or ""
+        sid = m.get("sender_id") or ""
+        if stype == "app":
+            sender = "🤖机器人"
+        elif m.get("sender_name"):
+            sender = m["sender_name"]
+        elif sid in name_map:
+            sender = name_map[sid]
+        else:
+            sender = sid[:12] if sid else "未知"
         normalized.append({
             "ts": m.get("create_time_str") or m.get("ts") or
                   (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(m.get("create_time", 0)))
                    if m.get("create_time") else ""),
-            "sender": m.get("sender_name") or m.get("sender_id", "")[:12],
+            "sender": sender,
             "text": (m.get("text") or "")[:500],
         })
     normalized.sort(key=lambda x: x["ts"])

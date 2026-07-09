@@ -676,18 +676,21 @@ class _TaskCard:
         detail = detail or "_(无输出)_"
         if len(detail) > self._DETAIL_LIMIT:
             detail = detail[:self._DETAIL_LIMIT] + f"\n\n…(已截断,共 {len(detail)} 字符)"
-        return {
-            "tag": "collapsible_panel", "expanded": False,
-            "header": {"title": {"tag": "plain_text", "content": f"Turn {idx} · {summary}"}},
-            "elements": [{"tag": "markdown", "content": detail}],
-        }
+        return {"tag": "markdown", "content": f"**Turn {idx} · {summary}**\n{detail}"}
 
     def _build(self):
         els = [{"tag": "markdown", "content": f"**{self.status}**"}]
-        for i, (s, d) in enumerate(self.steps, 1):
-            els.append(self._step_panel(i, s, d))
+        # 最终结果优先、突出展示
         if self.final:
             els += [{"tag": "hr"}, {"tag": "markdown", "content": self.final}]
+        # 所有中间轮次收进【单个】折叠面板，默认收起，保持界面清爽
+        if self.steps:
+            inner = [self._step_panel(i, s, d) for i, (s, d) in enumerate(self.steps, 1)]
+            els.append({
+                "tag": "collapsible_panel", "expanded": False,
+                "header": {"title": {"tag": "plain_text", "content": f"📂 查看执行过程（{len(self.steps)} 步）"}},
+                "elements": inner,
+            })
         return _card_raw(els)
 
     def _push(self):
@@ -857,12 +860,12 @@ class FeishuApp(AgentChatMixin):
             r = await asyncio.to_thread(find_chat_by_name, kw)
             if r.get("error"):
                 return await self.send_text(chat_id, f"❌ 查找失败: {r['error']}", **ctx)
-            matches = r.get("matches", [])
+            matches = r.get("chats", [])
             if not matches:
                 return await self.send_text(chat_id, f"未找到名称含「{kw}」的群。用 /chats 查看全部。", **ctx)
             lines = [f"🔍 含「{kw}」的群："]
             for m in matches:
-                lines.append(f"• {m['name']} | {m['chat_id']}")
+                lines.append(f"• {m.get('name', '?')} | {m.get('chat_id', '?')}")
             return await self.send_text(chat_id, "\n".join(lines), **ctx)
         if op == "/search":
             if len(parts) < 2:
