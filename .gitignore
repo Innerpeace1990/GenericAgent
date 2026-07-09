@@ -119,6 +119,9 @@ memory/L4_raw_sessions/*
 # Code Upgrade / Lifecycle SOP
 !memory/code_upgrade_sop.md
 
+# Git Push Policy SOP
+!memory/git_push_policy_sop.md
+
 # Task Continuity SOP
 !memory/task_continuity_sop.md
 

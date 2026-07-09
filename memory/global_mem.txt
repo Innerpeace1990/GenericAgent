@@ -10,6 +10,7 @@
 - 所有规则必须定期复盘，做好版本管理，标记失效时间和替代方案；对用户指令和引入的资源也要批判性评估，不照单全收。
 - 优先借鉴顶级咨询公司、世界500强、国际标准化委员会（ISO/IEC/ITU）及 PMI、PRINCE2、DevOps、安全、合规、需求管理等全球前沿行业知识体系，并思考实践。
 - 当用户询问跨平台聊天群/会话消息时，倾向于直接并行处理多个平台，而非逐一确认平台。
+- Git 工作流：已**完成且验证通过**的本地 commit，**直接 `git push origin main` 推送到 fork 无需再确认**（2026-07-09 用户授权）。具体判定标准见 `memory/git_push_policy_sop.md`，执行工具为 `scripts/git_push_guard.py`。
 - 已学习并评估的外部资源：
   - Stanford OVAL STORM：LLM 驱动的研究写作流水线，可借鉴其模块化 LLM 流程和检索增强思想；对本地 OS 操作型 Agent 不直接适用，但可用于复杂研究型任务。
   - Andrej Karpathy LLM Wiki：三层知识库（Raw sources/Wiki/Schema）与 Ingest/Query/Lint 工作流，高度契合 Generic Agent 的记忆系统；已引入"Schema 层"和"记忆 Lint"机制。
@@ -49,14 +50,14 @@
 - 本地仓库 remote origin：`git@github.com:Innerpeace1990/GenericAgent.git`（SSH）
 - 专用 SSH 密钥：`C:\Users\wangx\.ssh\id_github_genericagent`
 - 因 Windows 默认使用系统 OpenSSH，Git 已配置 `core.sshCommand` 指向 Git for Windows 自带的 `ssh.exe`，否则新密钥的权限修复不生效。
-- 当前分支：`main`；本地领先 fork 的 `main` 31 个提交；官方上游最新 commit 为 `7200d0e8`（2026-07-07），本地落后官方上游 3 个提交（共同祖先 `eff6802b`）。
+- 当前分支：`main`；本地与 fork 的 `main` **已同步**（2026-07-09 推送 44 个 commit 到 origin）。后续新增标准变更由 `scripts/git_push_guard.py` 按 `memory/git_push_policy_sop.md` 自动判断并推送。官方上游最新 commit 为 `67e262d`（2026-07-09），本地相对 upstream 领先 43 个 commit、落后 1 个 commit。
 - `.gitignore` 规则 `memory/*`（L37）忽略整个 memory 目录：已用 `git add -f` 纳入版本控制的 memory 文件（各 SOP）修改后可正常 commit；**新建 memory 文件必须 `git add -f`** 才能纳入版本控制（普通 `git add` 会被忽略而漏提交）。
 
 ## [GA Code Upgrade]
 - 升级 SOP：`../memory/code_upgrade_sop.md`（v1.0，2026-07-08）
 - 当前 TUI 版本状态：README 主推 `frontends/tuiapp_v2.py`（Textual TUI v2）；最新官方 TUI 功能提交为 `frontends/tuiapp_v2.py` 的 `worldline` 回溯（2026-07-07）。
 - 网络注意：Git HTTPS fetch（`https://github.com/lsdefine/GenericAgent.git`）在当前系统代理下会被 `Connection reset`；SSH fetch 可用；Python `requests` 访问 GitHub API 时需显式禁用代理（`proxies={'http':None,'https':None}`），否则 `SSLEOFError`。
-- 升级风险：本地有 31 个定制提交（11 纯新增 + 5 核心文件改动 + 2 其他）。官方 3 个新增提交改动 12 个文件，包含 `agent_loop.py` 和 `llmcore.py`，需人工处理潜在冲突。
+- 升级风险：本地相对 upstream 有 43 个定制提交。官方新增 1 个 commit（`67e262d`），后续升级时需处理 merge/rebase。
 
 ## [LLM Orchestration]
 - 当前后端：主模型 `zhipu-glm`（国内 Coding Plan，Anthropic 协议）+ 备用模型 `kimi`（端点 `https://api.kimi.com/coding/v1`），固定顺序故障转移。
