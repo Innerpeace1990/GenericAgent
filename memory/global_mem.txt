@@ -44,6 +44,7 @@
 - 【Chrome "由贵组织管理"根因，2026-07-08】"由贵组织管理"提示**不是**tmwd扩展导致的，而是 HKLM\SOFTWARE\Policies\Google\Chrome\LocalNetworkAccessAllowedForUrls 注册表策略，其值是[*.singlewindow.cn]等中国海关/单一窗口类网站（报关软件安装的企业策略）。2026-07-08已将该策略键清理（备份于 D:\generic-agent\temp\chrome_policy_backup_20260708.reg），Chrome重启后"由贵组织管理"提示应消失。其他Google注册表策略路径(ProgramData\Google\Chrome\Policies)无残留。
 
 ## [Git / GitHub]
+- 浏览器 GitHub 登录账号：`steipete`（Peter Steinberger，用户主力账号）；GA fork 用的是另一个账号 `Innerpeace1990`，两者不要混淆。访问用户 star 仓库/搜索时直接用浏览器已登录态。
 - 本地主仓库根目录：`D:\generic-agent`
 - 官方上游仓库：`https://github.com/lsdefine/GenericAgent`（13.3K★，main 分支）
 - 本地 fork 地址：`https://github.com/Innerpeace1990/GenericAgent`（0★，私有副本）
@@ -106,6 +107,7 @@
 - 事件订阅互斥规则：后台「事件配置」与「回调配置」的订阅方式必须分别与代码实现一致；消息类事件（`im.message.receive_v1`）在「事件配置」中。
 - 教训：长连接/Webhook 二选一，代码演进时必须同步更新后台配置与 SOP。详见 `../memory/lessons_feishu_integration.md`。
 - 【群消息监控+总结能力 v1.0，2026-07-09】`frontends/fs_group.py`（工具模块）+ `fsapp.py`（持久化+命令）已上线。`list_chats`/`list_messages`/`summarize_chat`/`search_messages`/`save_message`，真实 API 验证通过（2 个群 + 真实消息）。飞书命令 `/chats /summary /search`；Agent 可经 code_run 调用。SDK 关键：`item.sender.id`/`item.msg_type`/`item.body.content`。详见 `../memory/feishu_group_sop.md`。
+- 【凭证注入路径，2026-07-10 验证】`fs_group` 凭证有 3 路：①环境变量 `FS_APP_ID`/`FS_APP_SECRET`（独立脚本通常无）②`set_credentials()` 注入（fsapp 长连接进程启动时）③`fsapp` 模块复用：`import fsapp; fs_group.set_credentials(fsapp.APP_ID, fsapp.APP_SECRET)`（复用 mykey.py，独立脚本首选）。独立脚本调飞书 API 用第 3 路。宣称"飞书不可用"前必须探测全部 3 路（Rule5）。
 
 ## [WeCom AiBot / 企业微信智能机器人]
 - 项目路径：`D:\generic-agent\temp\wecom_aibot_bot`
